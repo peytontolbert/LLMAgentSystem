@@ -22,10 +22,7 @@ class CollaborationSystem:
             required_specializations = self._analyze_task_requirements(task)
             agents = await self._ensure_agents(required_specializations)
             
-            if len(agents) == 1:
-                result = await agents[0].process_task(task)
-            else:
-                result = await self._facilitate_multi_agent_conversation(agents, task)
+            result = await self._facilitate_multi_agent_conversation(agents, task)
             
             await self.knowledge_graph.add_node("TaskResult", {"task_id": task.get("id"), "result": str(result)})
             return result
@@ -33,6 +30,30 @@ class CollaborationSystem:
             error_message = f"Error processing task: {str(e)}"
             logger.error(error_message, exc_info=True)
             return {"error": error_message}
+
+    async def _facilitate_multi_agent_conversation(self, agents: List[Agent], task: Dict[str, Any]) -> Dict[str, Any]:
+        conversation_history = []
+        max_rounds = 5
+        for round in range(max_rounds):
+            for agent in agents:
+                context = {
+                    "task": task,
+                    "conversation_history": conversation_history,
+                    "round": round
+                }
+                agent_response = await agent.process_task(context)
+                conversation_history.append(f"{agent.name}: {agent_response['result']}")
+            
+            if self._is_task_completed(conversation_history):
+                break
+        
+        # Final synthesis by the first agent
+        final_result = await agents[0].process_task({
+            "task": task,
+            "conversation_history": conversation_history,
+            "final_synthesis": True
+        })
+        return final_result
 
     def _analyze_task_requirements(self, task: Dict[str, Any]) -> List[str]:
         # This is a placeholder. In a real implementation, this would use NLP to determine required specializations.
@@ -56,14 +77,25 @@ class CollaborationSystem:
 
     async def _facilitate_multi_agent_conversation(self, agents: List[Agent], task: Dict[str, Any]) -> Dict[str, Any]:
         conversation_history = []
-        for round in range(3):  # Limit to 3 rounds of conversation
+        max_rounds = 5
+        for round in range(max_rounds):
             for agent in agents:
-                agent_response = await agent.process_task({"content": f"{task['content']}\n\nPrevious conversation: {conversation_history}"})
+                context = {
+                    "task": task,
+                    "conversation_history": conversation_history,
+                    "round": round
+                }
+                agent_response = await agent.process_task(context)
                 conversation_history.append(f"{agent.name}: {agent_response['result']}")
+            
+            if self._is_task_completed(conversation_history):
+                break
         
         # Final synthesis by the first agent
         final_result = await agents[0].process_task({
-            "content": f"Synthesize the results of this conversation to complete the task: {task['content']}\n\nConversation: {conversation_history}"
+            "task": task,
+            "conversation_history": conversation_history,
+            "final_synthesis": True
         })
         return final_result
 

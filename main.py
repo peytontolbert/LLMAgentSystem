@@ -19,13 +19,12 @@ from app.skills.skill_manager import SkillManager
 from typing import Dict, Any
 import asyncio
 import os
-from app.ui import cli, dashboard_router
-from fastapi.responses import HTMLResponse
+import shutil
+from typing import List, Dict, Any
+import uuid
+from collections import deque
 import logging
 from logging.handlers import RotatingFileHandler
-from collections import deque
-import uuid
-import shutil
 
 # Set up logging
 log_directory = "logs"
@@ -207,12 +206,12 @@ async def process_chat_message(message: str) -> str:
         parsed_input = await nl_parser.parse(message)
         task_type = await task_classifier.classify(parsed_input)
         
-        if "document" in message.lower() and "copying" in message.lower() and "workspace" in message.lower():
-            # Extract the path from the message
-            path = message.split("D:\\")[-1] if "D:\\" in message else "D:\\autoagi\\app"
-            path = "D:\\" + path
+        if "document" in message.lower() or "copy" in message.lower():
+            path = "D:\\autoagi\\app"  # Default path
+            if "D:\\" in message:
+                path = message.split("D:\\")[-1].split()[0]
+                path = "D:\\" + path
             
-            # Copy the directory to workspace and document
             result = await copy_and_document(path)
         else:
             task = {"type": task_type, "content": message}
@@ -262,12 +261,15 @@ async def document_directory(path: str) -> str:
 
 async def document_file(path: str, indent: str) -> str:
     try:
-        with open(path, 'r') as file:
-            content = file.read()
+        file_stat = os.stat(path)
         file_type = os.path.splitext(path)[1]
         summary = f"{indent}File type: {file_type}\n"
-        summary += f"{indent}Size: {os.path.getsize(path)} bytes\n"
-        summary += f"{indent}Content preview: {content[:100]}...\n" if len(content) > 100 else f"{indent}Content: {content}\n"
+        summary += f"{indent}Size: {file_stat.st_size} bytes\n"
+        summary += f"{indent}Last modified: {file_stat.st_mtime}\n"
+        if file_type in ['.txt', '.py', '.md', '.json', '.yaml', '.yml']:
+            with open(path, 'r', encoding='utf-8') as file:
+                content = file.read(1000)  # Read first 1000 characters
+            summary += f"{indent}Content preview: {content[:100]}...\n" if len(content) > 100 else f"{indent}Content: {content}\n"
         return summary
     except Exception as e:
         return f"{indent}Error reading file: {str(e)}\n"
