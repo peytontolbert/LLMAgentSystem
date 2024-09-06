@@ -25,6 +25,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from collections import deque
 import uuid
+import shutil
 
 # Set up logging
 log_directory = "logs"
@@ -206,15 +207,16 @@ async def process_chat_message(message: str) -> str:
         parsed_input = await nl_parser.parse(message)
         task_type = await task_classifier.classify(parsed_input)
         
-        if task_type == "analysis" and "review" in message.lower() and "document" in message.lower():
-            path = message.split()[-1]  # Assume the path is the last word in the message
-            result = await review_and_document(path)
+        if "document" in message.lower() and "copying" in message.lower() and "workspace" in message.lower():
+            # Extract the path from the message
+            path = message.split("D:\\")[-1] if "D:\\" in message else "D:\\autoagi\\app"
+            path = "D:\\" + path
+            
+            # Copy the directory to workspace and document
+            result = await copy_and_document(path)
         else:
             task = {"type": task_type, "content": message}
-            if task_type == "chat":
-                result = await collaboration_system.process_chat(task)
-            else:
-                result = await collaboration_system.process_task(task)
+            result = await collaboration_system.process_task(task)
         
         if isinstance(result, dict):
             if "error" in result:
@@ -226,6 +228,49 @@ async def process_chat_message(message: str) -> str:
         error_message = f"Error processing message: {str(e)}"
         logger.error(error_message, exc_info=True)
         return f"I apologize, but I encountered an unexpected error. Can you please try rephrasing your request or providing more details about what you'd like me to do?"
+
+async def copy_and_document(path: str) -> Dict[str, Any]:
+    logger.info(f"Copying and documenting: {path}")
+    try:
+        if not os.path.exists(path):
+            return {"error": f"The path {path} does not exist."}
+        
+        # Copy to workspace
+        workspace_path = await copy_to_workspace(path)
+        
+        # Document the copied files
+        documentation = await document_directory(workspace_path)
+        
+        return {"result": f"Files copied to workspace and documented:\n\n{documentation}"}
+    except Exception as e:
+        error_message = f"Error copying and documenting {path}: {str(e)}"
+        logger.error(error_message, exc_info=True)
+        return {"error": error_message}
+
+async def document_directory(path: str) -> str:
+    documentation = f"Documentation for {path}:\n\n"
+    for root, dirs, files in os.walk(path):
+        level = root.replace(path, '').count(os.sep)
+        indent = ' ' * 4 * level
+        documentation += f"{indent}{os.path.basename(root)}/\n"
+        sub_indent = ' ' * 4 * (level + 1)
+        for file in files:
+            file_path = os.path.join(root, file)
+            documentation += f"{sub_indent}{file}\n"
+            documentation += await document_file(file_path, sub_indent + '    ')
+    return documentation
+
+async def document_file(path: str, indent: str) -> str:
+    try:
+        with open(path, 'r') as file:
+            content = file.read()
+        file_type = os.path.splitext(path)[1]
+        summary = f"{indent}File type: {file_type}\n"
+        summary += f"{indent}Size: {os.path.getsize(path)} bytes\n"
+        summary += f"{indent}Content preview: {content[:100]}...\n" if len(content) > 100 else f"{indent}Content: {content}\n"
+        return summary
+    except Exception as e:
+        return f"{indent}Error reading file: {str(e)}\n"
 
 @app.post("/cli")
 async def execute_cli_command(command: str, args: Dict[str, Any]):
@@ -260,30 +305,14 @@ async def chat():
     </html>
     """
 
-@app.post("/review_and_document")
-async def review_and_document(path: str):
-    logger.info(f"Reviewing and documenting: {path}")
+async def copy_to_workspace(source_path: str) -> str:
     try:
-        if not os.path.exists(path):
-            return {"error": f"The path {path} does not exist."}
-        
-        if os.path.isfile(path):
-            return {"error": f"{path} is a file. Please provide a directory path."}
-        
-        files = os.listdir(path)
-        documentation = f"Directory contents of {path}:\n\n"
-        for file in files:
-            full_path = os.path.join(path, file)
-            if os.path.isdir(full_path):
-                documentation += f"- {file}/ (directory)\n"
-            else:
-                documentation += f"- {file}\n"
-        
-        return {"result": documentation}
+        destination_path = workspace_manager.copy_to_workspace(source_path)
+        logger.info(f"Copied {source_path} to workspace: {destination_path}")
+        return destination_path
     except Exception as e:
-        error_message = f"Error reviewing and documenting {path}: {str(e)}"
-        logger.error(error_message, exc_info=True)
-        return {"error": error_message}
+        logger.error(f"Error copying to workspace: {str(e)}")
+        raise
 
 app.include_router(dashboard_router)
 
