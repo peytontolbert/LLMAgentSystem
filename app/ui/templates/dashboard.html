@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Agent System Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <h1>LLM Agent System Dashboard</h1>
+        <div>
+            <h2>Create Project</h2>
+            <input v-model="newProjectName" placeholder="Project name">
+            <button @click="createProject">Create Project</button>
+        </div>
+        <div>
+            <h2>Process Natural Language</h2>
+            <input v-model="nlInput" placeholder="Enter natural language input">
+            <button @click="processNL">Process</button>
+            <p>{{ nlResponse }}</p>
+        </div>
+    </div>
+
+    <script>
+        new Vue({
+            el: '#app',
+            data: {
+                newProjectName: '',
+                nlInput: '',
+                nlResponse: ''
+            },
+            methods: {
+                createProject() {
+                    axios.post('/projects', null, { params: { project_name: this.newProjectName } })
+                        .then(response => {
+                            alert(response.data.message);
+                            this.newProjectName = '';
+                        })
+                        .catch(error => {
+                            console.error('Error creating project:', error);
+                        });
+                },
+                processNL() {
+                    axios.post('/process_natural_language', null, { params: { text: this.nlInput } })
+                        .then(response => {
+                            this.nlResponse = response.data.response;
+                            this.nlInput = '';
+                        })
+                        .catch(error => {
+                            console.error('Error processing natural language:', error);
+                        });
+                }
+            }
+        });
+    </script>
+</body>
+</html>

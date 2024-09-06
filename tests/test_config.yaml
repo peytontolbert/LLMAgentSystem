@@ -1,0 +1,15 @@
+default:
+  log_level: DEBUG
+  max_agents: 5
+
+development:
+  database_url: "sqlite:///./dev.db"
+  api_key: "dev_api_key"
+
+production:
+  database_url: "postgresql://user:password@localhost/prod_db"
+  api_key: "prod_api_key"
+
+testing:
+  database_url: "sqlite:///./test.db"
+  api_key: "test_api_key"
