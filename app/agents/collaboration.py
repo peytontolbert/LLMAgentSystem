@@ -124,13 +124,25 @@ class CollaborationSystem:
             return {"error": error_message}
 
     async def request_collaboration(self, requester: Agent, task: Dict[str, Any]) -> None:
-        # Implement logic to choose the best collaborator
-        collaborator = next(agent for agent in self.agents if agent != requester)
-        await event_bus.publish("collaboration_requested", {
-            "requester": requester,
-            "collaborator_id": collaborator.agent_id,
-            "task": task
-        })
+        logger.info(f"Collaboration requested by {requester.name} for task: {task}")
+        try:
+            # Implement logic to choose the best collaborator
+            collaborator = next(agent for agent in self.agents.values() if agent != requester)
+            
+            # Directly handle the collaboration request
+            collaboration_result = await collaborator.collaborate(requester, task)
+            
+            # Process the collaboration result
+            await self._handle_collaboration_completed({
+                "requester_id": requester.agent_id,
+                "collaborator_id": collaborator.agent_id,
+                "task": task,
+                "result": collaboration_result
+            })
+        except Exception as e:
+            error_message = f"Error in collaboration request: {str(e)}"
+            logger.error(error_message, exc_info=True)
+            # Handle the error appropriately, maybe notify the requester
 
     async def _handle_task_completed(self, data: Dict[str, Any]):
         # Process the completed task

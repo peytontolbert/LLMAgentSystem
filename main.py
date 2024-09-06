@@ -1,7 +1,9 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from neo4j import AsyncGraphDatabase
+from contextlib import asynccontextmanager
 from app.agents.factory import AgentFactory
 from app.agents.collaboration import CollaborationSystem
 from app.virtual_env.virtual_environment import VirtualEnvironment
@@ -16,15 +18,13 @@ from app.logging.logging_manager import LoggingManager
 from app.config.config_manager import ConfigManager, EnvironmentManager
 from app.chat_with_ollama import ChatGPT
 from app.skills.skill_manager import SkillManager
-from typing import Dict, Any
+from app.agents.base import Agent  # Add this import
+from typing import Dict, Any, List
 import asyncio
 import os
-import shutil
-from typing import List, Dict, Any
-import uuid
-from collections import deque
 import logging
 from logging.handlers import RotatingFileHandler
+import uuid
 
 # Set up logging
 log_directory = "logs"
@@ -40,7 +40,20 @@ logging.basicConfig(level=logging.INFO,
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Application starting up")
+    await knowledge_graph.connect()
+    logger.info("Connected to knowledge graph")
+    yield
+    # Shutdown
+    logger.info("Application shutting down")
+    await knowledge_graph.close()
+    await neo4j_driver.close()
+    logger.info("Closed all connections")
+
+app = FastAPI(lifespan=lifespan)
 
 # CORS middleware
 app.add_middleware(
@@ -69,14 +82,11 @@ neo4j_password = config_manager.get("NEO4J_PASSWORD")
 neo4j_driver = AsyncGraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
 
 # Core components
-llm = ChatGPT(base_url="http://localhost:11434")  # Assuming Ollama is running on the default port
+llm = ChatGPT(base_url="http://localhost:11434")
 knowledge_graph = KnowledgeGraph(neo4j_driver)
-
-# Virtual Environment setup
 virtual_env_base_path = config_manager.get("VIRTUAL_ENV_BASE_PATH", os.path.join(os.getcwd(), "virtual_env"))
 virtual_env = VirtualEnvironment(base_path=virtual_env_base_path)
-
-workspace_manager = WorkspaceManager(virtual_env)
+workspace_manager = WorkspaceManager(base_path=os.path.join(os.getcwd(), "workspaces"))
 task_manager = TaskManager()
 skill_manager = SkillManager()
 agent_factory = AgentFactory(skill_manager, llm)
@@ -84,121 +94,124 @@ collaboration_system = CollaborationSystem(agent_factory, task_manager, knowledg
 project_manager = ProjectManager(workspace_manager, knowledge_graph)
 security_manager = SecurityManager()
 logging_manager = LoggingManager()
-
 nl_parser = NLParser()
 task_classifier = TaskClassifier()
 nl_generator = NLGenerator()
-
 code_generator = CodeGenerator()
 code_analyzer = CodeAnalyzer()
 test_generator = TestGenerator()
 
-conversation_history = deque(maxlen=5)  # Keeps last 5 interactions
-
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Application starting up")
-    await knowledge_graph.connect()
-    logger.info("Connected to knowledge graph")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("Application shutting down")
-    await knowledge_graph.close()
-    await neo4j_driver.close()
-    logger.info("Closed all connections")
+conversation_history = []
 
 @app.get("/")
 async def root():
     logger.info("Root endpoint accessed")
     return {"message": "Welcome to the Advanced LLM-based Agent System"}
 
+class TaskEnvironment:
+    def __init__(self, task: Dict[str, Any], virtual_env: VirtualEnvironment, workspace_manager: WorkspaceManager):
+        self.task = task
+        self.virtual_env = virtual_env
+        self.workspace_manager = workspace_manager
+        self.env_id = None
+        self.task_workspace = None
+
+    async def setup(self):
+        self.env_id = await self.virtual_env.create_environment(str(uuid.uuid4()))
+        self.task_workspace = self.workspace_manager.create_task_workspace()
+        logger.info(f"Set up task environment: {self.env_id} with workspace: {self.task_workspace}")
+
+    async def cleanup(self):
+        if self.env_id:
+            await self.virtual_env.destroy_environment(self.env_id)
+        if self.task_workspace:
+            self.workspace_manager.clear_task_workspace(self.task_workspace)
+        logger.info(f"Cleaned up task environment: {self.env_id} and workspace: {self.task_workspace}")
+
+class AgentChain:
+    def __init__(self, agents: List[Agent], task_environment: TaskEnvironment):
+        self.agents = agents
+        self.task_environment = task_environment
+
+    async def execute(self):
+        result = None
+        for agent in self.agents:
+            agent_task = {
+                "content": self.task_environment.task["content"],
+                "previous_result": result,
+                "env_id": self.task_environment.env_id,
+                "task_workspace": self.task_environment.task_workspace
+            }
+            result = await agent.process_task(agent_task)
+            logger.info(f"Agent {agent.name} processed task: {result}")
+        return result
+
+async def create_agent_chain(task: Dict[str, Any]) -> AgentChain:
+    required_specializations = task.get("required_specializations", ["planner", "programmer", "reviewer"])
+    agents = []
+    for spec in required_specializations:
+        agent = await agent_factory.create_agent(spec)
+        agents.append(agent)
+    
+    task_environment = TaskEnvironment(task, virtual_env, workspace_manager)
+    await task_environment.setup()
+    
+    return AgentChain(agents, task_environment)
+
 @app.post("/process_task")
 async def process_task(task: Dict[str, Any]):
     logger.info(f"Received task: {task}")
     try:
-        task_id = str(uuid.uuid4())
-        task["id"] = task_id
-        
-        # Set up task environment
-        env_path = virtual_env.create_sandbox(task_id, task.get("type", "general"))
-        
-        # Process the task
-        result = await collaboration_system.process_task(task)
-        
-        # Clean up
-        virtual_env.delete_sandbox(task_id)
+        agent_chain = await create_agent_chain(task)
+        result = await agent_chain.execute()
+        await agent_chain.task_environment.cleanup()
         
         return {"result": result}
     except Exception as e:
         logger.error(f"Error processing task: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/collaborate")
-async def collaborate_on_task(task: Dict[str, Any]):
-    logger.info(f"Received collaboration task: {task}")
+async def document_path(path: str) -> Dict[str, Any]:
+    logger.info(f"Documenting path: {path}")
     try:
-        result = await collaboration_system.collaborate_on_task(task)
-        logger.debug(f"Collaboration result: {result}")
-        response = await nl_generator.generate_response(result)
-        logger.info(f"Generated response for collaboration: {response}")
-        return {"response": response}
+        # Remove "all of" if present
+        path = path.replace("all of ", "").strip()
+        
+        if not os.path.exists(path):
+            return {"error": f"The path {path} does not exist."}
+        
+        if os.path.isfile(path):
+            return await document_file(path)
+        elif os.path.isdir(path):
+            return await document_directory(path)
+        else:
+            return {"error": f"The path {path} is neither a file nor a directory."}
     except Exception as e:
-        logger.error(f"Error in collaboration: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Error in collaboration")
+        error_message = f"Error documenting {path}: {str(e)}"
+        logger.error(error_message, exc_info=True)
+        return {"error": error_message}
 
-@app.post("/generate_code")
-async def generate_code(specification: Dict[str, Any]):
-    try:
-        code = await code_generator.generate_code(specification)
-        analysis = await code_analyzer.analyze_code(code)
-        tests = await test_generator.generate_tests(code)
-        return {"generated_code": code, "analysis": analysis, "tests": tests}
-    except Exception as e:
-        logging_manager.log_error(f"Error generating code: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error generating code")
+async def document_file(path: str) -> Dict[str, Any]:
+    file_info = os.stat(path)
+    return {
+        "result": f"File: {os.path.basename(path)}\n"
+                  f"Size: {file_info.st_size} bytes\n"
+                  f"Last modified: {file_info.st_mtime}\n"
+                  f"Type: {os.path.splitext(path)[1]}"
+    }
 
-@app.post("/create_project")
-async def create_project(project_name: str):
-    try:
-        result = await project_manager.create_project(project_name)
-        return {"message": result}
-    except Exception as e:
-        logging_manager.log_error(f"Error creating project: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error creating project")
-
-@app.post("/security/check_code")
-async def check_code_safety(code: str):
-    try:
-        result = await security_manager.check_code_safety(code)
-        return result
-    except Exception as e:
-        logging_manager.log_error(f"Error checking code safety: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error checking code safety")
-
-# WebSocket for real-time updates
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    logger.info("WebSocket connection opened")
-    try:
-        while True:
-            try:
-                data = await websocket.receive_text()
-                logger.info(f"Received WebSocket message: {data}")
-                response = await process_chat_message(data)
-                conversation_history.append({"user": data, "assistant": response})
-                await websocket.send_text(response)
-                logger.info(f"Sent WebSocket response: {response}")
-            except WebSocketDisconnect:
-                logger.info("WebSocket disconnected")
-                break
-            except Exception as e:
-                error_message = f"Error processing WebSocket message: {str(e)}"
-                logger.error(error_message, exc_info=True)
-                await websocket.send_text(error_message)
-    finally:
-        logger.info("WebSocket connection closed")
+async def document_directory(path: str) -> Dict[str, Any]:
+    result = f"Directory contents of {path}:\n\n"
+    for root, dirs, files in os.walk(path):
+        level = root.replace(path, '').count(os.sep)
+        indent = ' ' * 4 * level
+        result += f"{indent}{os.path.basename(root)}/\n"
+        sub_indent = ' ' * 4 * (level + 1)
+        for file in files:
+            result += f"{sub_indent}{file}\n"
+        if level >= 2:  # Limit depth to avoid excessive output
+            dirs[:] = []  # Don't recurse any deeper
+    return {"result": result}
 
 async def process_chat_message(message: str) -> str:
     logger.info(f"Processing chat message: {message}")
@@ -206,16 +219,16 @@ async def process_chat_message(message: str) -> str:
         parsed_input = await nl_parser.parse(message)
         task_type = await task_classifier.classify(parsed_input)
         
-        if "document" in message.lower() or "copy" in message.lower():
-            path = "D:\\autoagi\\app"  # Default path
-            if "D:\\" in message:
-                path = message.split("D:\\")[-1].split()[0]
-                path = "D:\\" + path
-            
-            result = await copy_and_document(path)
+        if task_type == "analysis" and "document" in message.lower():
+            path = message.split("document", 1)[1].strip()  # Extract the path from the message
+            result = await document_path(path)
         else:
-            task = {"type": task_type, "content": message}
-            result = await collaboration_system.process_task(task)
+            task = {
+                "type": task_type,
+                "content": message,
+                "required_specializations": ["planner", "programmer", "reviewer"]
+            }
+            result = await process_task(task)
         
         if isinstance(result, dict):
             if "error" in result:
@@ -228,56 +241,24 @@ async def process_chat_message(message: str) -> str:
         logger.error(error_message, exc_info=True)
         return f"I apologize, but I encountered an unexpected error. Can you please try rephrasing your request or providing more details about what you'd like me to do?"
 
-async def copy_and_document(path: str) -> Dict[str, Any]:
-    logger.info(f"Copying and documenting: {path}")
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    logger.info("WebSocket connection opened")
     try:
-        if not os.path.exists(path):
-            return {"error": f"The path {path} does not exist."}
-        
-        # Copy to workspace
-        workspace_path = await copy_to_workspace(path)
-        
-        # Document the copied files
-        documentation = await document_directory(workspace_path)
-        
-        return {"result": f"Files copied to workspace and documented:\n\n{documentation}"}
+        while True:
+            data = await websocket.receive_text()
+            logger.info(f"Received WebSocket message: {data}")
+            response = await process_chat_message(data)
+            conversation_history.append({"user": data, "assistant": response})
+            await websocket.send_text(response)
+            logger.info(f"Sent WebSocket response: {response}")
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected")
     except Exception as e:
-        error_message = f"Error copying and documenting {path}: {str(e)}"
-        logger.error(error_message, exc_info=True)
-        return {"error": error_message}
-
-async def document_directory(path: str) -> str:
-    documentation = f"Documentation for {path}:\n\n"
-    for root, dirs, files in os.walk(path):
-        level = root.replace(path, '').count(os.sep)
-        indent = ' ' * 4 * level
-        documentation += f"{indent}{os.path.basename(root)}/\n"
-        sub_indent = ' ' * 4 * (level + 1)
-        for file in files:
-            file_path = os.path.join(root, file)
-            documentation += f"{sub_indent}{file}\n"
-            documentation += await document_file(file_path, sub_indent + '    ')
-    return documentation
-
-async def document_file(path: str, indent: str) -> str:
-    try:
-        file_stat = os.stat(path)
-        file_type = os.path.splitext(path)[1]
-        summary = f"{indent}File type: {file_type}\n"
-        summary += f"{indent}Size: {file_stat.st_size} bytes\n"
-        summary += f"{indent}Last modified: {file_stat.st_mtime}\n"
-        if file_type in ['.txt', '.py', '.md', '.json', '.yaml', '.yml']:
-            with open(path, 'r', encoding='utf-8') as file:
-                content = file.read(1000)  # Read first 1000 characters
-            summary += f"{indent}Content preview: {content[:100]}...\n" if len(content) > 100 else f"{indent}Content: {content}\n"
-        return summary
-    except Exception as e:
-        return f"{indent}Error reading file: {str(e)}\n"
-
-@app.post("/cli")
-async def execute_cli_command(command: str, args: Dict[str, Any]):
-    result = cli.invoke(args=[command] + [str(arg) for arg in args.values()])
-    return {"result": result.output}
+        logger.error(f"WebSocket error: {str(e)}", exc_info=True)
+    finally:
+        logger.info("WebSocket connection closed")
 
 @app.get("/chat", response_class=HTMLResponse)
 async def chat():
@@ -306,17 +287,6 @@ async def chat():
         </body>
     </html>
     """
-
-async def copy_to_workspace(source_path: str) -> str:
-    try:
-        destination_path = workspace_manager.copy_to_workspace(source_path)
-        logger.info(f"Copied {source_path} to workspace: {destination_path}")
-        return destination_path
-    except Exception as e:
-        logger.error(f"Error copying to workspace: {str(e)}")
-        raise
-
-app.include_router(dashboard_router)
 
 if __name__ == "__main__":
     import uvicorn

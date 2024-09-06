@@ -18,9 +18,11 @@ class Agent(ABC):
         # Implement the task processing logic here
         pass
 
-    @abstractmethod
-    async def collaborate(self, other_agent: 'Agent', task: Dict[str, Any]) -> Dict[str, Any]:
-        pass
+    async def collaborate(self, requester: 'Agent', task: Dict[str, Any]) -> Dict[str, Any]:
+        # Implement collaboration logic here
+        collaboration_prompt = f"Collaborate with {requester.name} on task: {task['content']}"
+        collaboration_result = await self.generate_response(collaboration_prompt)
+        return {"result": collaboration_result}
 
     async def use_skill(self, skill_name: str, context: Dict[str, Any]) -> Dict[str, Any]:
         return await self.skill_manager.execute_skill(skill_name, context)

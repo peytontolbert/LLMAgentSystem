@@ -3,6 +3,7 @@ from typing import Dict, Any, List, Union
 import shutil
 import tempfile
 import logging
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -145,12 +146,13 @@ class VirtualEnvironment:
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    def create_environment(self, task_id: str):
+    async def create_environment(self, task_id: str) -> str:
         env_path = os.path.join(self.base_path, task_id)
         os.makedirs(env_path, exist_ok=True)
         logger.info(f"Created virtual environment for task {task_id}")
+        return task_id
 
-    def destroy_environment(self, task_id: str):
+    async def destroy_environment(self, task_id: str):
         env_path = os.path.join(self.base_path, task_id)
         if os.path.exists(env_path):
             shutil.rmtree(env_path)

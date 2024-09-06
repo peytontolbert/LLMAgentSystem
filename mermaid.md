@@ -1,3 +1,4 @@
+```mermaid
 graph TB
     A[Main Application] --> B[Agent System]
     A --> C[Virtual Environment]
