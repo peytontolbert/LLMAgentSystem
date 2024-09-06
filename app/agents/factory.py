@@ -4,6 +4,8 @@ from app.agents.base import Agent
 from app.skills.skill_manager import SkillManager
 from app.chat_with_ollama import ChatGPT
 import logging
+from app.agents.task_planner import TaskPlanner, TaskAnalyzer, ResultSynthesizer
+from app.agents.nlp_agent import NLPAgent
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,17 @@ class AgentFactory:
         agent_id = str(uuid.uuid4())
         agent_name = f"{specialization.capitalize()}Agent"
         logger.info(f"Creating agent: {agent_name} (ID: {agent_id})")
-        agent = DynamicAgent(agent_id, agent_name, specialization, self.skill_manager, self.llm)
-        logger.info(f"Created DynamicAgent: {agent_name}")
+        
+        if specialization == "task_planner":
+            agent = TaskPlanner(agent_id, agent_name, self.skill_manager, self.llm)
+        elif specialization == "task_analyzer":
+            agent = TaskAnalyzer(agent_id, agent_name, self.skill_manager, self.llm)
+        elif specialization == "result_synthesizer":
+            agent = ResultSynthesizer(agent_id, agent_name, self.skill_manager, self.llm)
+        elif specialization == "nlp":
+            agent = NLPAgent(agent_id, agent_name, self.skill_manager, self.llm)
+        else:
+            agent = DynamicAgent(agent_id, agent_name, specialization, self.skill_manager, self.llm)
+        
+        logger.info(f"Created agent: {agent_name}")
         return agent

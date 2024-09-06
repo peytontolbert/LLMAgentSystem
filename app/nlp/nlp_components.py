@@ -6,53 +6,49 @@ logger = logging.getLogger(__name__)
 
 class NLParser:
     async def parse(self, text: str) -> Dict[str, Any]:
-        # This is a placeholder implementation
-        # In a real-world scenario, you'd use more sophisticated NLP techniques
-        logger.info(f"Parsing text: {text}")
-        words = text.lower().split()
-        intent = "chat"
-        if any(word in words for word in ["review", "document", "analyze"]):
-            intent = "analysis"
-        elif any(word in words for word in ["code", "program", "develop"]):
-            intent = "coding"
-        return {"intent": intent, "original_text": text}
-
-    def _extract_intent(self, tokens: List[str]) -> str:
-        intent_keywords = {
-            "create": "create",
-            "update": "update",
-            "delete": "delete",
-            "get": "retrieve",
-            "list": "list",
-            "run": "execute"
+        parts = self._split_task(text)
+        return {
+            "actions": parts["actions"],
+            "target": parts["target"],
+            "output": parts["output"],
+            "original_text": text
         }
-        for token in tokens:
-            if token in intent_keywords:
-                return intent_keywords[token]
-        return "unknown"
 
-    def _extract_entities(self, tokens: List[str]) -> Dict[str, str]:
-        entities = {}
-        entity_patterns = {
-            "file": r"file:(\w+)",
-            "directory": r"dir:(\w+)",
-            "project": r"project:(\w+)",
-            "task": r"task:(\w+)"
-        }
-        for token in tokens:
-            for entity_type, pattern in entity_patterns.items():
-                match = re.search(pattern, token)
-                if match:
-                    entities[entity_type] = match.group(1)
-        return entities
+    def _split_task(self, text: str) -> Dict[str, Any]:
+        actions = []
+        target = ""
+        output = ""
+
+        # Extract actions
+        action_words = ["review", "create", "document", "save", "analyze"]
+        for word in action_words:
+            if word in text.lower():
+                actions.append(word)
+
+        # Extract target (assuming it's a path)
+        path_match = re.search(r'(?:for|in|at)\s+((?:[A-Za-z]:\\|\/)[^\s]+)', text)
+        if path_match:
+            target = path_match.group(1)
+
+        # Extract output file
+        output_match = re.search(r'save\s+(?:as|to)\s+(\S+)', text)
+        if output_match:
+            output = output_match.group(1)
+
+        return {"actions": actions, "target": target, "output": output}
 
 class TaskClassifier:
     async def classify(self, parsed_input: Dict[str, Any]) -> str:
-        logger.info(f"Classifying task: {parsed_input}")
-        if not isinstance(parsed_input, dict) or "intent" not in parsed_input:
-            logger.warning(f"Invalid input for task classification: {parsed_input}")
-            return "chat"  # Default to chat if we can't determine the task type
-        return parsed_input["intent"]
+        actions = parsed_input.get("actions", [])
+        
+        if "review" in actions or "document" in actions:
+            return "documentation"
+        elif "create" in actions:
+            return "creation"
+        elif "analyze" in actions:
+            return "analysis"
+        else:
+            return "general"
 
 class NLGenerator:
     def generate_response(self, task_result: Dict[str, Any]) -> str:

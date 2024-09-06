@@ -19,6 +19,7 @@ from app.config.config_manager import ConfigManager, EnvironmentManager
 from app.chat_with_ollama import ChatGPT
 from app.skills.skill_manager import SkillManager
 from app.agents.base import Agent  # Add this import
+from app.agents.meta_agent import MetaAgent
 from typing import Dict, Any, List
 import asyncio
 import os
@@ -125,7 +126,7 @@ class TaskEnvironment:
         if self.env_id:
             await self.virtual_env.destroy_environment(self.env_id)
         if self.task_workspace:
-            self.workspace_manager.clear_task_workspace(self.task_workspace)
+            self.workspace_manager.clear_workspace(self.task_workspace)
         logger.info(f"Cleaned up task environment: {self.env_id} and workspace: {self.task_workspace}")
 
 class AgentChain:
@@ -162,10 +163,8 @@ async def create_agent_chain(task: Dict[str, Any]) -> AgentChain:
 async def process_task(task: Dict[str, Any]):
     logger.info(f"Received task: {task}")
     try:
-        agent_chain = await create_agent_chain(task)
-        result = await agent_chain.execute()
-        await agent_chain.task_environment.cleanup()
-        
+        meta_agent = MetaAgent(agent_factory, virtual_env, workspace_manager)
+        result = await meta_agent.process_task(task)
         return {"result": result}
     except Exception as e:
         logger.error(f"Error processing task: {str(e)}", exc_info=True)
@@ -216,26 +215,34 @@ async def document_directory(path: str) -> Dict[str, Any]:
 async def process_chat_message(message: str) -> str:
     logger.info(f"Processing chat message: {message}")
     try:
-        parsed_input = await nl_parser.parse(message)
-        task_type = await task_classifier.classify(parsed_input)
+        nlp_agent = await agent_factory.create_agent("nlp")
+        parsed_task = await nlp_agent.process_task({"content": message})
         
-        if task_type == "analysis" and "document" in message.lower():
-            path = message.split("document", 1)[1].strip()  # Extract the path from the message
-            result = await document_path(path)
+        result = parsed_task["result"]
+        task_type = "documentation"  # Default to documentation for now
+        actions = result["parsed_task"].get("actions", [])
+        target = result["parsed_task"].get("target", "")
+        output = result["parsed_task"].get("output", "")
+        
+        if "document" in actions or "review" in actions:
+            doc_result = await document_path(target)
+            if output:
+                workspace_path = workspace_manager.get_workspace_path()
+                output_path = os.path.join(workspace_path, output)
+                with open(output_path, 'w') as f:
+                    f.write(str(doc_result["result"]))
+                doc_result["result"] += f"\n\nDocumentation saved to {output_path}"
+            return str(doc_result["result"])
         else:
             task = {
                 "type": task_type,
                 "content": message,
-                "required_specializations": ["planner", "programmer", "reviewer"]
+                "parsed_task": result["parsed_task"],
+                "task_plan": result["task_plan"]
             }
-            result = await process_task(task)
-        
-        if isinstance(result, dict):
-            if "error" in result:
-                return f"I apologize, but I encountered an error: {result['error']}. How else can I assist you?"
-            elif "result" in result:
-                return str(result["result"])
-        return str(result)
+            meta_agent = MetaAgent(agent_factory, virtual_env, workspace_manager)
+            result = await meta_agent.process_task(task)
+            return str(result["result"])
     except Exception as e:
         error_message = f"Error processing message: {str(e)}"
         logger.error(error_message, exc_info=True)
