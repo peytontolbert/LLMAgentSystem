@@ -1,16 +1,21 @@
 from typing import Dict, Any, List
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 class NLParser:
-    def parse(self, text: str) -> Dict[str, Any]:
-        # This is a simple implementation. In a real-world scenario, you'd use more sophisticated NLP techniques.
-        tokens = text.lower().split()
-        intent = self._extract_intent(tokens)
-        entities = self._extract_entities(tokens)
-        return {
-            "intent": intent,
-            "entities": entities
-        }
+    async def parse(self, text: str) -> Dict[str, Any]:
+        # This is a placeholder implementation
+        # In a real-world scenario, you'd use more sophisticated NLP techniques
+        logger.info(f"Parsing text: {text}")
+        words = text.lower().split()
+        intent = "chat"
+        if any(word in words for word in ["review", "document", "analyze"]):
+            intent = "analysis"
+        elif any(word in words for word in ["code", "program", "develop"]):
+            intent = "coding"
+        return {"intent": intent, "original_text": text}
 
     def _extract_intent(self, tokens: List[str]) -> str:
         intent_keywords = {
@@ -42,24 +47,12 @@ class NLParser:
         return entities
 
 class TaskClassifier:
-    def classify(self, parsed_input: Dict[str, Any]) -> str:
-        intent = parsed_input["intent"]
-        entities = parsed_input["entities"]
-
-        if intent == "create" and "file" in entities:
-            return "create_file"
-        elif intent == "update" and "file" in entities:
-            return "update_file"
-        elif intent == "delete" and "file" in entities:
-            return "delete_file"
-        elif intent == "create" and "directory" in entities:
-            return "create_directory"
-        elif intent == "list" and "directory" in entities:
-            return "list_directory"
-        elif intent == "execute" and "task" in entities:
-            return "execute_task"
-        else:
-            return "unknown_task"
+    async def classify(self, parsed_input: Dict[str, Any]) -> str:
+        logger.info(f"Classifying task: {parsed_input}")
+        if not isinstance(parsed_input, dict) or "intent" not in parsed_input:
+            logger.warning(f"Invalid input for task classification: {parsed_input}")
+            return "chat"  # Default to chat if we can't determine the task type
+        return parsed_input["intent"]
 
 class NLGenerator:
     def generate_response(self, task_result: Dict[str, Any]) -> str:

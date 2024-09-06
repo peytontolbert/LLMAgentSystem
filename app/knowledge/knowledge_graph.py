@@ -17,9 +17,9 @@ class KnowledgeGraph:
         # Any cleanup operations if needed
         pass
 
-    def add_node(self, label: str, properties: Dict[str, Any]):
-        with self.driver.session() as session:
-            session.write_transaction(self._create_node, label, properties)
+    async def add_node(self, node_type: str, properties: Dict[str, Any]):
+        # Implement the node addition logic here
+        pass
 
     def add_relationship(self, start_node: Dict[str, Any], end_node: Dict[str, Any], relationship_type: str, properties: Dict[str, Any] = {}):
         with self.driver.session() as session:

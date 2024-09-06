@@ -2,6 +2,9 @@ import os
 from typing import Dict, Any, List, Union
 import shutil
 import tempfile
+import logging
+
+logger = logging.getLogger(__name__)
 
 class VirtualFile:
     def __init__(self, name: str, content: str = ""):
@@ -16,7 +19,9 @@ class VirtualDirectory:
 class VirtualEnvironment:
     def __init__(self, base_path: str):
         self.base_path = base_path
-        os.makedirs(self.base_path, exist_ok=True)
+        if not os.path.exists(self.base_path):
+            os.makedirs(self.base_path)
+        logger.info(f"VirtualEnvironment initialized with base path: {self.base_path}")
         self.root = VirtualDirectory("")
         self.sandboxes: Dict[str, str] = {}
 
@@ -139,3 +144,14 @@ class VirtualEnvironment:
             file_path = os.path.join(sandbox_path, filename)
             if os.path.exists(file_path):
                 os.remove(file_path)
+
+    def create_environment(self, task_id: str):
+        env_path = os.path.join(self.base_path, task_id)
+        os.makedirs(env_path, exist_ok=True)
+        logger.info(f"Created virtual environment for task {task_id}")
+
+    def destroy_environment(self, task_id: str):
+        env_path = os.path.join(self.base_path, task_id)
+        if os.path.exists(env_path):
+            shutil.rmtree(env_path)
+            logger.info(f"Destroyed virtual environment for task {task_id}")

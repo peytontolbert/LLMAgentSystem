@@ -14,7 +14,8 @@ class Agent(ABC):
         self._register_event_handlers()
 
     @abstractmethod
-    async def process_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def process_task(self, task: Dict[str, Any]) -> Any:
+        # Implement the task processing logic here
         pass
 
     @abstractmethod

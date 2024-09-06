@@ -1,49 +1,95 @@
 from typing import List, Dict, Any
 from app.agents.base import Agent
-from app.event_system.event_bus import event_bus
 from app.agents.factory import AgentFactory
 from app.tasks.task_manager import TaskManager
 from app.knowledge.knowledge_graph import KnowledgeGraph
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class CollaborationSystem:
     def __init__(self, agent_factory: AgentFactory, task_manager: TaskManager, knowledge_graph: KnowledgeGraph):
         self.agent_factory = agent_factory
         self.task_manager = task_manager
         self.knowledge_graph = knowledge_graph
-        self.agents: List[Agent] = []
-        event_bus.subscribe("task_completed", self._handle_task_completed)
-        event_bus.subscribe("collaboration_completed", self._handle_collaboration_completed)
-
-    def add_agent(self, agent: Agent):
-        self.agents.append(agent)
+        self.agents: Dict[str, Agent] = {}
+        logger.info("CollaborationSystem initialized")
 
     async def process_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        # Implement task processing logic here
-        # This is a placeholder implementation
-        if not self.agents:
-            return {"error": "No agents available to process the task"}
+        logger.info(f"Processing task: {task}")
+        try:
+            required_specializations = self._analyze_task_requirements(task)
+            agents = await self._ensure_agents(required_specializations)
+            
+            if len(agents) == 1:
+                result = await agents[0].process_task(task)
+            else:
+                result = await self._facilitate_multi_agent_conversation(agents, task)
+            
+            await self.knowledge_graph.add_node("TaskResult", {"task_id": task.get("id"), "result": str(result)})
+            return result
+        except Exception as e:
+            error_message = f"Error processing task: {str(e)}"
+            logger.error(error_message, exc_info=True)
+            return {"error": error_message}
+
+    def _analyze_task_requirements(self, task: Dict[str, Any]) -> List[str]:
+        # This is a placeholder. In a real implementation, this would use NLP to determine required specializations.
+        task_type = task.get('type', 'general')
+        if task_type == 'coding':
+            return ['programmer', 'code_reviewer']
+        elif task_type == 'design':
+            return ['ui_designer', 'ux_specialist']
+        else:
+            return ['general']
+
+    async def _ensure_agents(self, specializations: List[str]) -> List[Agent]:
+        agents = []
+        for spec in specializations:
+            if spec not in self.agents:
+                new_agent = await self.agent_factory.create_agent(spec)
+                self.agents[spec] = new_agent
+                logger.info(f"Created new agent for specialization: {spec}")
+            agents.append(self.agents[spec])
+        return agents
+
+    async def _facilitate_multi_agent_conversation(self, agents: List[Agent], task: Dict[str, Any]) -> Dict[str, Any]:
+        conversation_history = []
+        for round in range(3):  # Limit to 3 rounds of conversation
+            for agent in agents:
+                agent_response = await agent.process_task({"content": f"{task['content']}\n\nPrevious conversation: {conversation_history}"})
+                conversation_history.append(f"{agent.name}: {agent_response['result']}")
         
-        # For simplicity, let's assume the first agent processes the task
-        result = await self.agents[0].process_task(task)
-        
-        # Store the result in the knowledge graph
-        self.knowledge_graph.add_node("TaskResult", {"task_id": task.get("id"), "result": str(result)})
-        
-        return result
+        # Final synthesis by the first agent
+        final_result = await agents[0].process_task({
+            "content": f"Synthesize the results of this conversation to complete the task: {task['content']}\n\nConversation: {conversation_history}"
+        })
+        return final_result
 
     async def collaborate_on_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        # Implement collaboration logic here
-        # This is a placeholder implementation
-        if len(self.agents) < 2:
-            return {"error": "Not enough agents for collaboration"}
-        
-        agent1, agent2 = self.agents[:2]
-        result = await agent1.collaborate(agent2, task)
-        
-        # Store the collaboration result in the knowledge graph
-        self.knowledge_graph.add_node("CollaborationResult", {"task_id": task.get("id"), "result": str(result)})
-        
-        return result
+        logger.info(f"Collaborating on task: {task}")
+        try:
+            required_specializations = task.get('required_specializations', [])
+            if len(required_specializations) < 2:
+                return {"error": "At least two specializations are required for collaboration"}
+
+            for spec in required_specializations:
+                if spec not in self.agents:
+                    new_agent = await self.agent_factory.create_agent(f"agent_{spec}", spec)
+                    self.agents[spec] = new_agent
+                    logger.info(f"Created new agent for specialization: {spec}")
+
+            primary_agent = self.agents[required_specializations[0]]
+            secondary_agent = self.agents[required_specializations[1]]
+            result = await primary_agent.collaborate(secondary_agent, task)
+
+            await self.knowledge_graph.add_node("CollaborationResult", {"task_id": task.get("id"), "result": str(result)})
+            return result
+        except Exception as e:
+            error_message = f"Error in collaboration: {str(e)}"
+            logger.error(error_message, exc_info=True)
+            return {"error": error_message}
 
     async def request_collaboration(self, requester: Agent, task: Dict[str, Any]) -> None:
         # Implement logic to choose the best collaborator

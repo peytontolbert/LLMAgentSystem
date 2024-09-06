@@ -20,6 +20,25 @@ from typing import Dict, Any
 import asyncio
 import os
 from app.ui import cli, dashboard_router
+from fastapi.responses import HTMLResponse
+import logging
+from logging.handlers import RotatingFileHandler
+from collections import deque
+import uuid
+
+# Set up logging
+log_directory = "logs"
+if not os.path.exists(log_directory):
+    os.makedirs(log_directory)
+
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        RotatingFileHandler(os.path.join(log_directory, "app.log"), maxBytes=10000000, backupCount=5),
+                        logging.StreamHandler()
+                    ])
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -37,7 +56,7 @@ static_dir = "app/ui/static"
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 else:
-    print(f"Warning: Static directory '{static_dir}' does not exist. Skipping static files mounting.")
+    logger.warning(f"Static directory '{static_dir}' does not exist. Skipping static files mounting.")
 
 # Configuration
 config_manager = ConfigManager("config.yaml")
@@ -50,7 +69,7 @@ neo4j_password = config_manager.get("NEO4J_PASSWORD")
 neo4j_driver = AsyncGraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
 
 # Core components
-llm = ChatGPT()
+llm = ChatGPT(base_url="http://localhost:11434")  # Assuming Ollama is running on the default port
 knowledge_graph = KnowledgeGraph(neo4j_driver)
 
 # Virtual Environment setup
@@ -74,30 +93,59 @@ code_generator = CodeGenerator()
 code_analyzer = CodeAnalyzer()
 test_generator = TestGenerator()
 
+conversation_history = deque(maxlen=5)  # Keeps last 5 interactions
+
 @app.on_event("startup")
 async def startup_event():
+    logger.info("Application starting up")
     await knowledge_graph.connect()
+    logger.info("Connected to knowledge graph")
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    logger.info("Application shutting down")
     await knowledge_graph.close()
     await neo4j_driver.close()
+    logger.info("Closed all connections")
 
 @app.get("/")
 async def root():
+    logger.info("Root endpoint accessed")
     return {"message": "Welcome to the Advanced LLM-based Agent System"}
 
 @app.post("/process_task")
 async def process_task(task: Dict[str, Any]):
+    logger.info(f"Received task: {task}")
     try:
-        parsed_input = await nl_parser.parse(task["content"])
-        task_type = await task_classifier.classify(parsed_input)
-        result = await collaboration_system.process_task({"type": task_type, "content": task["content"]})
+        task_id = str(uuid.uuid4())
+        task["id"] = task_id
+        
+        # Set up task environment
+        env_path = virtual_env.create_sandbox(task_id, task.get("type", "general"))
+        
+        # Process the task
+        result = await collaboration_system.process_task(task)
+        
+        # Clean up
+        virtual_env.delete_sandbox(task_id)
+        
+        return {"result": result}
+    except Exception as e:
+        logger.error(f"Error processing task: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/collaborate")
+async def collaborate_on_task(task: Dict[str, Any]):
+    logger.info(f"Received collaboration task: {task}")
+    try:
+        result = await collaboration_system.collaborate_on_task(task)
+        logger.debug(f"Collaboration result: {result}")
         response = await nl_generator.generate_response(result)
+        logger.info(f"Generated response for collaboration: {response}")
         return {"response": response}
     except Exception as e:
-        logging_manager.log_error(f"Error processing task: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error processing task")
+        logger.error(f"Error in collaboration: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error in collaboration")
 
 @app.post("/generate_code")
 async def generate_code(specification: Dict[str, Any]):
@@ -132,18 +180,110 @@ async def check_code_safety(code: str):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    logger.info("WebSocket connection opened")
     try:
         while True:
-            data = await websocket.receive_text()
-            # Process the received data and send updates
-            await websocket.send_text(f"Processed: {data}")
-    except WebSocketDisconnect:
-        logging_manager.log_info("WebSocket disconnected")
+            try:
+                data = await websocket.receive_text()
+                logger.info(f"Received WebSocket message: {data}")
+                response = await process_chat_message(data)
+                conversation_history.append({"user": data, "assistant": response})
+                await websocket.send_text(response)
+                logger.info(f"Sent WebSocket response: {response}")
+            except WebSocketDisconnect:
+                logger.info("WebSocket disconnected")
+                break
+            except Exception as e:
+                error_message = f"Error processing WebSocket message: {str(e)}"
+                logger.error(error_message, exc_info=True)
+                await websocket.send_text(error_message)
+    finally:
+        logger.info("WebSocket connection closed")
+
+async def process_chat_message(message: str) -> str:
+    logger.info(f"Processing chat message: {message}")
+    try:
+        parsed_input = await nl_parser.parse(message)
+        task_type = await task_classifier.classify(parsed_input)
+        
+        if task_type == "analysis" and "review" in message.lower() and "document" in message.lower():
+            path = message.split()[-1]  # Assume the path is the last word in the message
+            result = await review_and_document(path)
+        else:
+            task = {"type": task_type, "content": message}
+            if task_type == "chat":
+                result = await collaboration_system.process_chat(task)
+            else:
+                result = await collaboration_system.process_task(task)
+        
+        if isinstance(result, dict):
+            if "error" in result:
+                return f"I apologize, but I encountered an error: {result['error']}. How else can I assist you?"
+            elif "result" in result:
+                return str(result["result"])
+        return str(result)
+    except Exception as e:
+        error_message = f"Error processing message: {str(e)}"
+        logger.error(error_message, exc_info=True)
+        return f"I apologize, but I encountered an unexpected error. Can you please try rephrasing your request or providing more details about what you'd like me to do?"
 
 @app.post("/cli")
 async def execute_cli_command(command: str, args: Dict[str, Any]):
     result = cli.invoke(args=[command] + [str(arg) for arg in args.values()])
     return {"result": result.output}
+
+@app.get("/chat", response_class=HTMLResponse)
+async def chat():
+    return """
+    <html>
+        <head>
+            <title>Chat Interface</title>
+        </head>
+        <body>
+            <h1>Chat Interface</h1>
+            <div id="messages"></div>
+            <input type="text" id="messageInput" placeholder="Type your message...">
+            <button onclick="sendMessage()">Send</button>
+            <script>
+                var ws = new WebSocket("ws://" + location.host + "/ws");
+                ws.onmessage = function(event) {
+                    var messages = document.getElementById('messages');
+                    messages.innerHTML += '<p>' + event.data + '</p>';
+                };
+                function sendMessage() {
+                    var input = document.getElementById("messageInput");
+                    ws.send(input.value);
+                    input.value = '';
+                }
+            </script>
+        </body>
+    </html>
+    """
+
+@app.post("/review_and_document")
+async def review_and_document(path: str):
+    logger.info(f"Reviewing and documenting: {path}")
+    try:
+        if not os.path.exists(path):
+            return {"error": f"The path {path} does not exist."}
+        
+        if os.path.isfile(path):
+            return {"error": f"{path} is a file. Please provide a directory path."}
+        
+        files = os.listdir(path)
+        documentation = f"Directory contents of {path}:\n\n"
+        for file in files:
+            full_path = os.path.join(path, file)
+            if os.path.isdir(full_path):
+                documentation += f"- {file}/ (directory)\n"
+            else:
+                documentation += f"- {file}\n"
+        
+        return {"result": documentation}
+    except Exception as e:
+        error_message = f"Error reviewing and documenting {path}: {str(e)}"
+        logger.error(error_message, exc_info=True)
+        return {"error": error_message}
 
 app.include_router(dashboard_router)
 
