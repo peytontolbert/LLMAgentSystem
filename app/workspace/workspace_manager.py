@@ -4,8 +4,7 @@ from typing import List
 from app.virtual_env.virtual_environment import VirtualEnvironment
 
 class WorkspaceManager:
-    def __init__(self, base_path: str, virtual_env: VirtualEnvironment):
-        self.base_path = base_path
+    def __init__(self, virtual_env: VirtualEnvironment):
         self.virtual_env = virtual_env
 
     def create_file(self, path: str, content: str = "") -> None:

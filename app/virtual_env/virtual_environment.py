@@ -16,6 +16,7 @@ class VirtualDirectory:
 class VirtualEnvironment:
     def __init__(self, base_path: str):
         self.base_path = base_path
+        os.makedirs(self.base_path, exist_ok=True)
         self.root = VirtualDirectory("")
         self.sandboxes: Dict[str, str] = {}
 

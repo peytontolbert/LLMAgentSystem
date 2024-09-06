@@ -27,15 +27,10 @@ class ReviewAgent(Agent):
         return {"result": collaboration_result}
 
 class AgentFactory:
-    def __init__(self, skill_manager: SkillManager, llm: ChatGPT):
+    def __init__(self, skill_manager, llm):
         self.skill_manager = skill_manager
         self.llm = llm
 
-    def create_agent(self, agent_type: str, name: str) -> Agent:
-        agent_id = str(uuid.uuid4())
-        if agent_type == "coding":
-            return CodingAgent(agent_id, name, self.skill_manager, self.llm)
-        elif agent_type == "review":
-            return ReviewAgent(agent_id, name, self.skill_manager, self.llm)
-        else:
-            raise ValueError(f"Unknown agent type: {agent_type}")
+    def create_agent(self, agent_type, name):
+        # Implementation for creating agents
+        pass

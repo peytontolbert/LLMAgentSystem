@@ -3,13 +3,16 @@ default:
   max_agents: 10
 
 development:
-  database_url: "sqlite:///./dev.db"
-  api_key: "dev_api_key"
+  neo4j_uri: "bolt://localhost:7687"
+  neo4j_user: "neo4j"
+  neo4j_password: "dev_password"
 
 production:
-  database_url: "postgresql://user:password@localhost/prod_db"
-  api_key: "prod_api_key"
+  neo4j_uri: "bolt://neo4j-prod-server:7687"
+  neo4j_user: "neo4j"
+  neo4j_password: "prod_password"
 
 testing:
-  database_url: "sqlite:///./test.db"
-  api_key: "test_api_key"
+  neo4j_uri: "bolt://localhost:7687"
+  neo4j_user: "neo4j"
+  neo4j_password: "test_password"

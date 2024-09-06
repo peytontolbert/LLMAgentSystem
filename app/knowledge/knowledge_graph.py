@@ -6,14 +6,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class KnowledgeGraph:
-    def __init__(self):
-        uri = os.getenv("NEO4J_URI")
-        user = os.getenv("NEO4J_USER")
-        password = os.getenv("NEO4J_PASSWORD")
-        self.driver = GraphDatabase.driver(uri, auth=(user, password))
+    def __init__(self, neo4j_driver):
+        self.driver = neo4j_driver
 
-    def close(self):
-        self.driver.close()
+    async def connect(self):
+        # Any additional connection setup if needed
+        pass
+
+    async def close(self):
+        # Any cleanup operations if needed
+        pass
 
     def add_node(self, label: str, properties: Dict[str, Any]):
         with self.driver.session() as session:

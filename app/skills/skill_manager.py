@@ -86,16 +86,17 @@ if __name__ == '__main__':
 
 class SkillManager:
     def __init__(self):
-        self.skills: Dict[str, Skill] = {}
+        self.skills = {}
 
-    def register_skill(self, skill: Skill):
-        self.skills[skill.name] = skill
+    def register_skill(self, skill_name, skill_function):
+        self.skills[skill_name] = skill_function
 
-    def get_skill(self, skill_name: str) -> Skill:
-        if skill_name not in self.skills:
-            raise ValueError(f"Skill {skill_name} not found")
-        return self.skills[skill_name]
+    def get_skill(self, skill_name):
+        return self.skills.get(skill_name)
 
-    async def execute_skill(self, skill_name: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    def execute_skill(self, skill_name, *args, **kwargs):
         skill = self.get_skill(skill_name)
-        return await skill.execute(context)
+        if skill:
+            return skill(*args, **kwargs)
+        else:
+            raise ValueError(f"Skill '{skill_name}' not found")

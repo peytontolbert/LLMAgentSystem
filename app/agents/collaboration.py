@@ -1,9 +1,15 @@
 from typing import List, Dict, Any
 from app.agents.base import Agent
 from app.event_system.event_bus import event_bus
+from app.agents.factory import AgentFactory
+from app.tasks.task_manager import TaskManager
+from app.knowledge.knowledge_graph import KnowledgeGraph
 
 class CollaborationSystem:
-    def __init__(self):
+    def __init__(self, agent_factory: AgentFactory, task_manager: TaskManager, knowledge_graph: KnowledgeGraph):
+        self.agent_factory = agent_factory
+        self.task_manager = task_manager
+        self.knowledge_graph = knowledge_graph
         self.agents: List[Agent] = []
         event_bus.subscribe("task_completed", self._handle_task_completed)
         event_bus.subscribe("collaboration_completed", self._handle_collaboration_completed)
@@ -11,10 +17,33 @@ class CollaborationSystem:
     def add_agent(self, agent: Agent):
         self.agents.append(agent)
 
-    async def assign_task(self, task: Dict[str, Any]) -> None:
-        # Implement logic to choose the best agent for the task
-        chosen_agent = self.agents[0]  # Simplified for now
-        await event_bus.publish("task_assigned", {"agent_id": chosen_agent.agent_id, "task": task})
+    async def process_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        # Implement task processing logic here
+        # This is a placeholder implementation
+        if not self.agents:
+            return {"error": "No agents available to process the task"}
+        
+        # For simplicity, let's assume the first agent processes the task
+        result = await self.agents[0].process_task(task)
+        
+        # Store the result in the knowledge graph
+        self.knowledge_graph.add_node("TaskResult", {"task_id": task.get("id"), "result": str(result)})
+        
+        return result
+
+    async def collaborate_on_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        # Implement collaboration logic here
+        # This is a placeholder implementation
+        if len(self.agents) < 2:
+            return {"error": "Not enough agents for collaboration"}
+        
+        agent1, agent2 = self.agents[:2]
+        result = await agent1.collaborate(agent2, task)
+        
+        # Store the collaboration result in the knowledge graph
+        self.knowledge_graph.add_node("CollaborationResult", {"task_id": task.get("id"), "result": str(result)})
+        
+        return result
 
     async def request_collaboration(self, requester: Agent, task: Dict[str, Any]) -> None:
         # Implement logic to choose the best collaborator
@@ -32,22 +61,6 @@ class CollaborationSystem:
     async def _handle_collaboration_completed(self, data: Dict[str, Any]):
         # Process the completed collaboration
         print(f"Collaboration completed by agent {data['agent_id']}: {data['result']}")
-
-    async def collaborate_on_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        results = []
-        for i, agent in enumerate(self.agents):
-            if i == 0:
-                result = await agent.process_task(task)
-            else:
-                result = await agent.collaborate(self.agents[i-1], task)
-            results.append(result)
-            
-            # Share the result with all agents
-            for other_agent in self.agents:
-                if other_agent != agent:
-                    await other_agent.receive_message(str(result), agent.name)
-
-        return {"collaboration_results": results}
 
     async def multi_agent_conversation(self, initial_task: Dict[str, Any], max_turns: int = 5) -> Dict[str, Any]:
         conversation_history = []

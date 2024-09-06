@@ -47,11 +47,10 @@ This project implements a comprehensive, modular, and extensible system for dyna
    ```
    cp .env.example .env
    ```
-   Edit the `.env` file with your specific configuration.
+   Edit the `.env` file with your Neo4j configuration.
 
-5. Initialize the database and knowledge graph:
+5. Initialize the knowledge graph:
    ```
-   python scripts/init_db.py
    python scripts/init_knowledge_graph.py
    ```
 
