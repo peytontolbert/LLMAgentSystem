@@ -1,7 +1,7 @@
 import aiohttp
 import json
-import time
 import logging
+import re
 from typing import Dict, Any
 import asyncio
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -17,6 +17,7 @@ class ChatGPT:
 
     @retry(stop=stop_after_attempt(6), wait=wait_exponential(multiplier=1, min=4, max=10))
     async def chat_with_ollama(self, system_prompt: str, user_prompt: str) -> str:
+        logger.info(f"Sending request to Ollama with system prompt: {system_prompt} and user_prompt: {user_prompt}")
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.post(
@@ -30,6 +31,7 @@ class ChatGPT:
                     if response.status == 200:
                         data = await response.json()
                         if 'response' in data:
+                            logger.debug(f"Received response from Ollama: {data['response']}")
                             return data['response']
                         else:
                             logger.error(f"Unexpected response structure: {data}")
@@ -43,9 +45,11 @@ class ChatGPT:
                 raise
 
     async def generate(self, prompt: str) -> str:
+        logger.info(f"Generating response for prompt: {prompt}")
         return await self.chat_with_ollama("You are a helpful AI assistant.", prompt)
 
     async def robust_chat_with_ollama(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
+        logger.info(f"Starting robust chat with Ollama for system prompt: {system_prompt} and user_prompt: {user_prompt}")
         response = await self.chat_with_ollama(system_prompt, user_prompt)
         return await self._ensure_json_response(system_prompt, user_prompt, response)
 
@@ -60,7 +64,10 @@ class ChatGPT:
                         "properties": {
                             "description": {"type": "string"},
                             "tool": {"type": "string"},
-                            "dependencies": {"type": "array", "items": {"type": "string"}}
+                            "dependencies": {
+                                "type": "array",
+                                "items": {"type": "string"}
+                            }
                         },
                         "required": ["description", "tool", "dependencies"]
                     }
@@ -71,10 +78,16 @@ class ChatGPT:
 
         for attempt in range(3):
             try:
-                json_response = json.loads(response)
+                # Use regex to extract JSON part from the response
+                json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                if not json_match:
+                    raise ValueError("No JSON object found in the response")
+                
+                json_response = json.loads(json_match.group(0))
                 validate(instance=json_response, schema=schema)
+                logger.debug(f"Validated JSON response: {json_response}")
                 return json_response
-            except (json.JSONDecodeError, jsonschema.exceptions.ValidationError) as e:
+            except (json.JSONDecodeError, jsonschema.exceptions.ValidationError, ValueError) as e:
                 logger.error(f"Failed to parse or validate JSON response from Ollama: {e}")
                 feedback_prompt = f"""
                 The previous response was not in valid JSON format or did not match the required schema. Please correct it.
@@ -91,10 +104,9 @@ class ChatGPT:
                         ...
                     ]
                 }}
-                Ensure that the response is a valid JSON object and contains all required keys.
                 """
                 response = await self.chat_with_ollama(system_prompt, feedback_prompt)
-        return {"error": "Failed to parse or validate JSON response after multiple attempts"}
+        raise ValueError("Failed to get a valid JSON response after 3 attempts")
 
     async def chat_with_ollama_with_fallback(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
         try:

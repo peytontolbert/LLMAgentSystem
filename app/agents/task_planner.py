@@ -14,7 +14,9 @@ class TaskPlanner(Agent):
         super().__init__(agent_id, name, skill_manager, llm)
 
     async def process_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        logger.info(f"Processing task: {task}")
         subtasks = await self.break_down_task(task)
+        logger.info(f"Subtasks generated: {subtasks}")
         return {"result": subtasks}
 
     async def break_down_task(self, task: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -47,14 +49,18 @@ class TaskPlanner(Agent):
 
         Ensure that each subtask is a single, atomic operation.
         """
+        logger.debug(f"Generated prompt for breaking down task: {prompt}")
         response = await self.generate_response(prompt)
+        logger.debug(f"Response from LLM: {response}")
         return self._parse_json_response(response)
 
     def _parse_json_response(self, response: str) -> List[Dict[str, Any]]:
         try:
-            return json.loads(response)
-        except json.JSONDecodeError:
-            logger.error("Failed to parse JSON response from LLM.")
+            parsed_response = json.loads(response)
+            logger.debug(f"Parsed JSON response: {parsed_response}")
+            return parsed_response
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON response: {response}, error: {e}")
             return []
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
@@ -72,7 +78,9 @@ class TaskPlanner(Agent):
             "dependencies": ["List of dependencies"]
         }}
         """
+        logger.debug(f"Generated prompt for creating plan: {prompt}")
         response = await self.llm.chat_with_ollama_with_fallback("You are an expert task planner.", prompt)
+        logger.debug(f"Response from LLM: {response}")
         return self._parse_json_response(response)
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
@@ -90,30 +98,44 @@ class TaskPlanner(Agent):
             "dependencies": ["List of dependencies"]
         }}
         """
+        logger.debug(f"Generated prompt for optimizing plan: {prompt}")
         response = await self.llm.chat_with_ollama_with_fallback("You are an expert task optimizer.", prompt)
+        logger.debug(f"Response from LLM: {response}")
         return self._parse_json_response(response)
 
 class TaskAnalyzer(Agent):
     async def process_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        logger.info(f"Processing task: {task}")
         requirements = await self.analyze_requirements(task)
+        logger.info(f"Requirements analyzed: {requirements}")
         return {"result": requirements}
 
     async def analyze_requirements(self, task: Dict[str, Any]) -> List[str]:
         prompt = f"Analyze the requirements for this task and list the required agent specializations: {task['content']}"
+        logger.debug(f"Generated prompt for analyzing requirements: {prompt}")
         response = await self.generate_response(prompt)
+        logger.debug(f"Response from LLM: {response}")
         return self._parse_specializations(response)
 
     def _parse_specializations(self, response: str) -> List[str]:
-        # Implement parsing logic to extract specializations from the response
-        # This is a simplified example
-        return [spec.strip() for spec in response.split(',')]
+        try:
+            specializations = [spec.strip() for spec in response.split(',')]
+            logger.debug(f"Parsed specializations: {specializations}")
+            return specializations
+        except Exception as e:
+            logger.error(f"Failed to parse specializations: {response}, error: {e}")
+            return []
 
 class ResultSynthesizer(Agent):
     async def process_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        logger.info(f"Processing task: {task}")
         synthesized_result = await self.synthesize(task['results'])
+        logger.info(f"Synthesized result: {synthesized_result}")
         return {"result": synthesized_result}
 
     async def synthesize(self, results: Dict[str, Any]) -> Dict[str, Any]:
         prompt = f"Synthesize the following results into a coherent response: {results}"
+        logger.debug(f"Generated prompt for synthesizing results: {prompt}")
         response = await self.generate_response(prompt)
+        logger.debug(f"Response from LLM: {response}")
         return {"result": response}

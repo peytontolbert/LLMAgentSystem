@@ -15,28 +15,28 @@ class CollaborationSystem:
 
     async def collaborate_on_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(f"Initiating collaboration on task: {task['content']}")
-        
+
         # Analyze task and determine collaboration strategy
         strategy = await self._determine_collaboration_strategy(task)
-        
+
         # Break down task into subtasks
         subtasks = await self._break_down_task(task, strategy)
-        
+
         # Process subtasks
         results = []
         for subtask in subtasks:
             subtask_result = await self.meta_agent.process_task(subtask)
             results.append(subtask_result)
-            
+
             # Adapt collaboration strategy based on intermediate results
             strategy = await self._adapt_collaboration_strategy(strategy, subtask, subtask_result)
-        
+
         # Synthesize final result
         final_result = await self._synthesize_results(results, task)
-        
+
         # Store collaboration knowledge
         await self._store_collaboration_knowledge(task, strategy, results, final_result)
-        
+
         return final_result
 
     async def _determine_collaboration_strategy(self, task: Dict[str, Any]) -> Dict[str, Any]:
