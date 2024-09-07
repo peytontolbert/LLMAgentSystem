@@ -81,3 +81,10 @@ The system should be designed with scalability in mind, capable of handling mult
 Provide a detailed README.md file with instructions for setting up and running the system, including any necessary dependencies and environment variables.
 
 Generate the complete code for this project, organizing it into appropriate modules and packages. Include all necessary classes, functions, and methods to create a fully functional system.
+
+
+
+
+data retrieval pipelines and data implementation pipelines that self iterate on itself deciding the next best step to develop a really autonomous agent to complete anything
+
+high information entropy algorithm to not go decoherent and to be able to do anything and gain temporal awareness

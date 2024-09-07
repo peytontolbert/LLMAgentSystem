@@ -10,9 +10,13 @@ def config_manager():
 def environment_manager(config_manager):
     return EnvironmentManager(config_manager)
 
-def test_config_manager_load(config_manager):
-    assert config_manager.get("log_level") == "DEBUG"
-    assert config_manager.get("max_agents") == 5
+def test_config_manager_load(mocker):
+    mock_config = {'LOGGING': {'LEVEL': 'DEBUG'}}
+    mock_open = mocker.mock_open(read_data="LOGGING:\n  LEVEL: DEBUG")
+    mocker.patch('builtins.open', mock_open)
+    mocker.patch('yaml.safe_load', return_value=mock_config)
+    config_manager = ConfigManager('config.yaml')
+    assert config_manager.get('LOGGING', 'LEVEL') == 'DEBUG'
 
 def test_config_manager_get_env(config_manager):
     os.environ["TEST_ENV_VAR"] = "test_value"

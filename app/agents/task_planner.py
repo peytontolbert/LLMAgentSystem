@@ -1,24 +1,97 @@
 from app.agents.base import Agent
+from app.agents.skill_manager import SkillManager
+from app.chat_with_ollama import ChatGPT
 from typing import Dict, Any, List
+import json
+import uuid
+import logging
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+logger = logging.getLogger(__name__)
 
 class TaskPlanner(Agent):
+    def __init__(self, agent_id: str, name: str, skill_manager: SkillManager, llm: ChatGPT):
+        super().__init__(agent_id, name, skill_manager, llm)
+
     async def process_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
         subtasks = await self.break_down_task(task)
         return {"result": subtasks}
 
     async def break_down_task(self, task: Dict[str, Any]) -> List[Dict[str, Any]]:
-        prompt = f"Break down the following task into subtasks: {task['content']}"
-        response = await self.generate_response(prompt)
-        return self._parse_subtasks(response)
+        prompt = f"""
+        Break down the following task into simple, actionable subtasks:
+        Task: {task['content']}
 
-    def _parse_subtasks(self, response: str) -> List[Dict[str, Any]]:
-        # Implement parsing logic to convert the response into a list of subtasks
-        # This is a simplified example
-        subtasks = []
-        for line in response.split('\n'):
-            if line.strip():
-                subtasks.append({"id": f"subtask_{len(subtasks)}", "content": line.strip()})
-        return subtasks
+        Each subtask should be a concrete action that can be performed by a single tool.
+        Examples of actionable subtasks:
+        - Create a file named 'example.txt' with content 'Hello, World!'
+        - Copy directory 'source_folder' to 'destination_folder'
+        - Make a GET request to 'https://api.example.com/data'
+
+        Provide a detailed breakdown with the following structure for each subtask:
+        {{
+            "id": "unique_id",
+            "action": "create_file|copy_directory|make_api_request",
+            "parameters": {{
+                "file_name": "example.txt",
+                "content": "Hello, World!",
+                "source_path": "/path/to/source",
+                "destination_path": "/path/to/destination",
+                "url": "https://api.example.com/data",
+                "method": "GET"
+            }},
+            "estimated_complexity": float (0-1),
+            "dependencies": ["id1", "id2", ...],
+            "required_skills": ["file_manipulation", "api_interaction", ...]
+        }}
+
+        Ensure that each subtask is a single, atomic operation.
+        """
+        response = await self.generate_response(prompt)
+        return self._parse_json_response(response)
+
+    def _parse_json_response(self, response: str) -> List[Dict[str, Any]]:
+        try:
+            return json.loads(response)
+        except json.JSONDecodeError:
+            logger.error("Failed to parse JSON response from LLM.")
+            return []
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+    async def create_plan(self, task: Dict[str, Any], context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        prompt = f"""
+        Create a detailed plan for the following task:
+        
+        Task: {task['content']}
+        Context: {context}
+        
+        Provide the plan as a JSON array of steps, where each step has the following structure:
+        {{
+            "description": "Step description",
+            "tool": "Tool to use",
+            "dependencies": ["List of dependencies"]
+        }}
+        """
+        response = await self.llm.chat_with_ollama_with_fallback("You are an expert task planner.", prompt)
+        return self._parse_json_response(response)
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+    async def optimize_plan(self, plan: List[Dict[str, Any]], context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        prompt = f"""
+        Optimize the following task plan:
+        
+        Plan: {json.dumps(plan, indent=2)}
+        Context: {json.dumps(context, indent=2)}
+        
+        Provide the optimized plan as a JSON array of steps, where each step has the following structure:
+        {{
+            "description": "Step description",
+            "tool": "Tool to use",
+            "dependencies": ["List of dependencies"]
+        }}
+        """
+        response = await self.llm.chat_with_ollama_with_fallback("You are an expert task optimizer.", prompt)
+        return self._parse_json_response(response)
 
 class TaskAnalyzer(Agent):
     async def process_task(self, task: Dict[str, Any]) -> Dict[str, Any]:

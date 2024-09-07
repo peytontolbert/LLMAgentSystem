@@ -1,62 +1,119 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from neo4j import AsyncGraphDatabase
 from contextlib import asynccontextmanager
 from app.agents.factory import AgentFactory
+from app.agents.meta_agent import MetaAgent
 from app.agents.collaboration import CollaborationSystem
 from app.virtual_env.virtual_environment import VirtualEnvironment
 from app.workspace.workspace_manager import WorkspaceManager
-from app.tasks.task_manager import TaskManager
 from app.knowledge.knowledge_graph import KnowledgeGraph
-from app.nlp.nlp_components import NLParser, TaskClassifier, NLGenerator
-from app.code_gen.code_components import CodeGenerator, CodeAnalyzer, TestGenerator
-from app.project_management.project_manager import ProjectManager
-from app.security.security_manager import SecurityManager
-from app.logging.logging_manager import LoggingManager
-from app.config.config_manager import ConfigManager, EnvironmentManager
+from app.memory.memory_system import MemorySystem
+from app.quantum.quantum_task_optimizer import QuantumInspiredTaskOptimizer  # Updated import
+from app.reinforcement_learning.advanced_rl import AdvancedRL
+from app.entropy_management.advanced_entropy_manager import AdvancedEntropyManager
 from app.chat_with_ollama import ChatGPT
-from app.skills.skill_manager import SkillManager
-from app.agents.base import Agent  # Add this import
-from app.agents.meta_agent import MetaAgent
-from typing import Dict, Any, List
+from app.agents.skill_manager import SkillManager
+from app.agents.task_planner import TaskPlanner
+from app.learning.continual_learner import ContinualLearner
+import logging
+import json
 import asyncio
 import os
-import logging
-from logging.handlers import RotatingFileHandler
-import uuid
+from dotenv import load_dotenv  # Ensure you have this import
+from neo4j import GraphDatabase  # Ensure you import the Neo4j driver
 
-# Set up logging
-log_directory = "logs"
-if not os.path.exists(log_directory):
-    os.makedirs(log_directory)
+# Load environment variables from .env file
+load_dotenv()
 
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    handlers=[
-                        RotatingFileHandler(os.path.join(log_directory, "app.log"), maxBytes=10000000, backupCount=5),
-                        logging.StreamHandler()
-                    ])
-
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    logger.info("Application starting up")
-    await knowledge_graph.connect()
-    logger.info("Connected to knowledge graph")
-    yield
-    # Shutdown
-    logger.info("Application shutting down")
-    await knowledge_graph.close()
-    await neo4j_driver.close()
-    logger.info("Closed all connections")
+    try:
+        # Startup
+        logger.info("Initializing AGI components...")
+        
+        # Provide the necessary arguments for KnowledgeGraph initialization
+        uri = os.getenv("NEO4J_URI")  # This should be the URI
+        user = os.getenv("NEO4J_USER")      # Your Neo4j username
+        password = os.getenv("NEO4J_PASSWORD")  # Your Neo4j password
+        
+        # Log the values for debugging (optional)
+        logger.info(f"Connecting to Neo4j with URI: {uri}, User: {user}")
+
+        app.state.knowledge_graph = KnowledgeGraph(uri, user, password)  # Updated initialization
+        await app.state.knowledge_graph.connect()
+        
+        # Specify a base path for the VirtualEnvironment
+        base_path = os.getenv("VIRTUAL_ENV_BASE_PATH", "./virtual_env")  # Default to './virtual_env' if not set
+        app.state.virtual_env = VirtualEnvironment(base_path)  # Provide the base_path argument
+        
+        # Specify a base path for the WorkspaceManager
+        workspace_base_path = os.getenv("WORKSPACE_BASE_PATH", "./workspaces")  # Default to './workspaces' if not set
+        app.state.workspace_manager = WorkspaceManager(workspace_base_path)  # Provide the base_path argument
+        
+        app.state.memory_system = MemorySystem()
+        app.state.quantum_optimizer = QuantumInspiredTaskOptimizer()  # Updated to new optimizer
+        
+        # Initialize LLM before AdvancedEntropyManager
+        app.state.llm = ChatGPT()
+        
+        # Specify dimensions for AdvancedRL
+        input_dim = 10  # Set this to the appropriate input dimension
+        hidden_dim = 64  # Set this to the desired hidden layer size
+        output_dim = 5  # Set this to the number of possible actions or outputs
+        app.state.advanced_rl = AdvancedRL(input_dim, hidden_dim, output_dim)  # Provide the required arguments
+        
+        app.state.entropy_manager = AdvancedEntropyManager(app.state.knowledge_graph, app.state.llm)
+        app.state.skill_manager = SkillManager()
+        app.state.task_planner = TaskPlanner("task_planner_id", "Task Planner", app.state.skill_manager, app.state.llm)  # Provide the required arguments
+        app.state.continual_learner = ContinualLearner(app.state.advanced_rl.policy_net)
+        
+        # Initialize agent_factory before meta_agent
+        app.state.agent_factory = AgentFactory(
+            app.state.skill_manager,
+            app.state.llm,
+            app.state.knowledge_graph,
+            app.state.memory_system,
+            app.state.quantum_optimizer,
+            app.state.advanced_rl,
+            app.state.entropy_manager,
+            app.state.task_planner
+        )
+        
+        app.state.meta_agent = MetaAgent(
+            app.state.agent_factory,
+            app.state.virtual_env,
+            app.state.workspace_manager,
+            app.state.knowledge_graph,
+            app.state.memory_system,
+            app.state.quantum_optimizer,
+            app.state.advanced_rl,
+            app.state.entropy_manager,
+            app.state.llm
+        )
+        
+        app.state.collaboration_system = CollaborationSystem(
+            app.state.meta_agent,
+            app.state.knowledge_graph,
+            app.state.llm
+        )
+        
+        logger.info("AGI components initialized successfully")
+        yield
+    except Exception as e:
+        logger.error(f"Error during startup: {str(e)}", exc_info=True)
+        raise
+    finally:
+        # Shutdown
+        logger.info("Shutting down AGI components...")
+        if app.state.knowledge_graph:
+            await app.state.knowledge_graph.close()
 
 app = FastAPI(lifespan=lifespan)
 
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -65,236 +122,106 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static files
-static_dir = "app/ui/static"
-if os.path.exists(static_dir):
-    app.mount("/static", StaticFiles(directory=static_dir), name="static")
-else:
-    logger.warning(f"Static directory '{static_dir}' does not exist. Skipping static files mounting.")
-
-# Configuration
-config_manager = ConfigManager("config.yaml")
-env_manager = EnvironmentManager(config_manager)
-
-# Neo4j connection
-neo4j_uri = config_manager.get("NEO4J_URI")
-neo4j_user = config_manager.get("NEO4J_USER")
-neo4j_password = config_manager.get("NEO4J_PASSWORD")
-neo4j_driver = AsyncGraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
-
-# Core components
-llm = ChatGPT(base_url="http://localhost:11434")
-knowledge_graph = KnowledgeGraph(neo4j_driver)
-virtual_env_base_path = config_manager.get("VIRTUAL_ENV_BASE_PATH", os.path.join(os.getcwd(), "virtual_env"))
-virtual_env = VirtualEnvironment(base_path=virtual_env_base_path)
-workspace_manager = WorkspaceManager(base_path=os.path.join(os.getcwd(), "workspaces"))
-task_manager = TaskManager()
-skill_manager = SkillManager()
-agent_factory = AgentFactory(skill_manager, llm)
-collaboration_system = CollaborationSystem(agent_factory, task_manager, knowledge_graph)
-project_manager = ProjectManager(workspace_manager, knowledge_graph)
-security_manager = SecurityManager()
-logging_manager = LoggingManager()
-nl_parser = NLParser()
-task_classifier = TaskClassifier()
-nl_generator = NLGenerator()
-code_generator = CodeGenerator()
-code_analyzer = CodeAnalyzer()
-test_generator = TestGenerator()
-
-conversation_history = []
-
 @app.get("/")
-async def root():
-    logger.info("Root endpoint accessed")
-    return {"message": "Welcome to the Advanced LLM-based Agent System"}
-
-class TaskEnvironment:
-    def __init__(self, task: Dict[str, Any], virtual_env: VirtualEnvironment, workspace_manager: WorkspaceManager):
-        self.task = task
-        self.virtual_env = virtual_env
-        self.workspace_manager = workspace_manager
-        self.env_id = None
-        self.task_workspace = None
-
-    async def setup(self):
-        self.env_id = await self.virtual_env.create_environment(str(uuid.uuid4()))
-        self.task_workspace = self.workspace_manager.create_task_workspace()
-        logger.info(f"Set up task environment: {self.env_id} with workspace: {self.task_workspace}")
-
-    async def cleanup(self):
-        if self.env_id:
-            await self.virtual_env.destroy_environment(self.env_id)
-        if self.task_workspace:
-            self.workspace_manager.clear_workspace(self.task_workspace)
-        logger.info(f"Cleaned up task environment: {self.env_id} and workspace: {self.task_workspace}")
-
-class AgentChain:
-    def __init__(self, agents: List[Agent], task_environment: TaskEnvironment):
-        self.agents = agents
-        self.task_environment = task_environment
-
-    async def execute(self):
-        result = None
-        for agent in self.agents:
-            agent_task = {
-                "content": self.task_environment.task["content"],
-                "previous_result": result,
-                "env_id": self.task_environment.env_id,
-                "task_workspace": self.task_environment.task_workspace
-            }
-            result = await agent.process_task(agent_task)
-            logger.info(f"Agent {agent.name} processed task: {result}")
-        return result
-
-async def create_agent_chain(task: Dict[str, Any]) -> AgentChain:
-    required_specializations = task.get("required_specializations", ["planner", "programmer", "reviewer"])
-    agents = []
-    for spec in required_specializations:
-        agent = await agent_factory.create_agent(spec)
-        agents.append(agent)
-    
-    task_environment = TaskEnvironment(task, virtual_env, workspace_manager)
-    await task_environment.setup()
-    
-    return AgentChain(agents, task_environment)
-
-@app.post("/process_task")
-async def process_task(task: Dict[str, Any]):
-    logger.info(f"Received task: {task}")
-    try:
-        meta_agent = MetaAgent(agent_factory, virtual_env, workspace_manager)
-        result = await meta_agent.process_task(task)
-        return {"result": result}
-    except Exception as e:
-        logger.error(f"Error processing task: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-async def document_path(path: str) -> Dict[str, Any]:
-    logger.info(f"Documenting path: {path}")
-    try:
-        # Remove "all of" if present
-        path = path.replace("all of ", "").strip()
-        
-        if not os.path.exists(path):
-            return {"error": f"The path {path} does not exist."}
-        
-        if os.path.isfile(path):
-            return await document_file(path)
-        elif os.path.isdir(path):
-            return await document_directory(path)
-        else:
-            return {"error": f"The path {path} is neither a file nor a directory."}
-    except Exception as e:
-        error_message = f"Error documenting {path}: {str(e)}"
-        logger.error(error_message, exc_info=True)
-        return {"error": error_message}
-
-async def document_file(path: str) -> Dict[str, Any]:
-    file_info = os.stat(path)
-    return {
-        "result": f"File: {os.path.basename(path)}\n"
-                  f"Size: {file_info.st_size} bytes\n"
-                  f"Last modified: {file_info.st_mtime}\n"
-                  f"Type: {os.path.splitext(path)[1]}"
-    }
-
-async def document_directory(path: str) -> Dict[str, Any]:
-    result = f"Directory contents of {path}:\n\n"
-    for root, dirs, files in os.walk(path):
-        level = root.replace(path, '').count(os.sep)
-        indent = ' ' * 4 * level
-        result += f"{indent}{os.path.basename(root)}/\n"
-        sub_indent = ' ' * 4 * (level + 1)
-        for file in files:
-            result += f"{sub_indent}{file}\n"
-        if level >= 2:  # Limit depth to avoid excessive output
-            dirs[:] = []  # Don't recurse any deeper
-    return {"result": result}
-
-async def process_chat_message(message: str) -> str:
-    logger.info(f"Processing chat message: {message}")
-    try:
-        nlp_agent = await agent_factory.create_agent("nlp")
-        parsed_task = await nlp_agent.process_task({"content": message})
-        
-        result = parsed_task["result"]
-        task_type = "documentation"  # Default to documentation for now
-        actions = result["parsed_task"].get("actions", [])
-        target = result["parsed_task"].get("target", "")
-        output = result["parsed_task"].get("output", "")
-        
-        if "document" in actions or "review" in actions:
-            doc_result = await document_path(target)
-            if output:
-                workspace_path = workspace_manager.get_workspace_path()
-                output_path = os.path.join(workspace_path, output)
-                with open(output_path, 'w') as f:
-                    f.write(str(doc_result["result"]))
-                doc_result["result"] += f"\n\nDocumentation saved to {output_path}"
-            return str(doc_result["result"])
-        else:
-            task = {
-                "type": task_type,
-                "content": message,
-                "parsed_task": result["parsed_task"],
-                "task_plan": result["task_plan"]
-            }
-            meta_agent = MetaAgent(agent_factory, virtual_env, workspace_manager)
-            result = await meta_agent.process_task(task)
-            return str(result["result"])
-    except Exception as e:
-        error_message = f"Error processing message: {str(e)}"
-        logger.error(error_message, exc_info=True)
-        return f"I apologize, but I encountered an unexpected error. Can you please try rephrasing your request or providing more details about what you'd like me to do?"
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    logger.info("WebSocket connection opened")
-    try:
-        while True:
-            data = await websocket.receive_text()
-            logger.info(f"Received WebSocket message: {data}")
-            response = await process_chat_message(data)
-            conversation_history.append({"user": data, "assistant": response})
-            await websocket.send_text(response)
-            logger.info(f"Sent WebSocket response: {response}")
-    except WebSocketDisconnect:
-        logger.info("WebSocket disconnected")
-    except Exception as e:
-        logger.error(f"WebSocket error: {str(e)}", exc_info=True)
-    finally:
-        logger.info("WebSocket connection closed")
-
-@app.get("/chat", response_class=HTMLResponse)
-async def chat():
-    return """
+async def get():
+    return HTMLResponse(content="""
     <html>
         <head>
-            <title>Chat Interface</title>
+            <title>AGI Chat Interface</title>
         </head>
         <body>
-            <h1>Chat Interface</h1>
-            <div id="messages"></div>
-            <input type="text" id="messageInput" placeholder="Type your message...">
-            <button onclick="sendMessage()">Send</button>
+            <h1>Welcome to the AGI Chat Interface</h1>
+            <form action="" onsubmit="sendMessage(event)">
+                <input type="text" id="messageText" autocomplete="off"/>
+                <button>Send</button>
+            </form>
+            <ul id='messages'>
+            </ul>
             <script>
                 var ws = new WebSocket("ws://" + location.host + "/ws");
                 ws.onmessage = function(event) {
-                    var messages = document.getElementById('messages');
-                    messages.innerHTML += '<p>' + event.data + '</p>';
+                    var messages = document.getElementById('messages')
+                    var message = document.createElement('li')
+                    var content = document.createTextNode(event.data)
+                    message.appendChild(content)
+                    messages.appendChild(message)
                 };
-                function sendMessage() {
-                    var input = document.getElementById("messageInput");
-                    ws.send(input.value);
-                    input.value = '';
+                function sendMessage(event) {
+                    var input = document.getElementById("messageText")
+                    ws.send(input.value)
+                    input.value = ''
+                    event.preventDefault()
                 }
             </script>
         </body>
     </html>
-    """
+    """)
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_text()
+            logger.info(f"Received message: {data}")
+            
+            task = {"content": data}
+            
+            # Use quantum-inspired task optimization
+            optimized_task = await app.state.quantum_optimizer.optimize_task_order([task])
+            
+            # Use the CollaborationSystem to process the task
+            result = await app.state.collaboration_system.collaborate_on_task(optimized_task[0])
+            
+            # Generate a novel approach using the MetaLearningAgent
+            novel_approach = await app.state.meta_agent.generate_novel_approach(data)
+            
+            # Combine the standard result with the novel approach
+            combined_result = {
+                "standard_result": result,
+                "novel_approach": novel_approach
+            }
+            
+            await websocket.send_text(json.dumps(combined_result))
+            
+            # Perform continuous learning
+            await app.state.continual_learner.learn(task, combined_result)
+            
+            # Update the knowledge graph with the task and result
+            await app.state.knowledge_graph.add_task_result(data, json.dumps(combined_result))
+            
+            # Trigger the continuous improvement loop
+            asyncio.create_task(continuous_improvement_loop(app))
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected")
+    except Exception as e:
+        logger.error(f"Error in WebSocket endpoint: {str(e)}", exc_info=True)
+
+async def continuous_improvement_loop(app):
+    while True:
+        try:
+            logger.info("Starting continuous improvement cycle")
+            
+            performance_metrics = await app.state.knowledge_graph.get_system_performance()
+            
+            # Use the MetaLearningAgent to suggest improvements
+            improvement_suggestions = await app.state.meta_agent.suggest_improvements(json.dumps(performance_metrics))
+            
+            # Implement the suggested improvements
+            await app.state.meta_agent.implement_improvements(improvement_suggestions)
+            
+            # Adapt the system architecture if needed
+            adaptation_plan = await app.state.meta_agent.adapt_system_architecture(performance_metrics)
+            
+            # Learn from the improvements and adaptations
+            await app.state.continual_learner.learn_from_improvements(json.dumps(adaptation_plan))
+            
+            logger.info("Completed continuous improvement cycle")
+        except Exception as e:
+            logger.error(f"Error in continuous improvement loop: {str(e)}", exc_info=True)
+        finally:
+            await asyncio.sleep(3600)  # Run every hour
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
