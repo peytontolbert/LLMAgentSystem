@@ -16,12 +16,14 @@ from app.chat_with_ollama import ChatGPT
 from app.agents.skill_manager import SkillManager
 from app.agents.task_planner import TaskPlanner
 from app.learning.continual_learner import ContinualLearner
+from app.agents.quantum_nlp_agent import QuantumNLPAgent
 import logging
 import json
 import asyncio
 import os
 from dotenv import load_dotenv  # Ensure you have this import
 from neo4j import GraphDatabase  # Ensure you import the Neo4j driver
+from app.utils.logger import logger  # New import
 
 # Load environment variables from .env file
 load_dotenv()
@@ -33,7 +35,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     try:
         # Startup
-        logger.info("Initializing AGI components...")
+        logger.info("Initializing AGI components...", {"component": "startup"})
         
         # Provide the necessary arguments for KnowledgeGraph initialization
         uri = os.getenv("NEO4J_URI")  # This should be the URI
@@ -41,7 +43,7 @@ async def lifespan(app: FastAPI):
         password = os.getenv("NEO4J_PASSWORD")  # Your Neo4j password
         
         # Log the values for debugging (optional)
-        logger.info(f"Connecting to Neo4j with URI: {uri}, User: {user}")
+        logger.info(f"Connecting to Neo4j with URI: {uri}, User: {user}", {"component": "startup"})
 
         app.state.knowledge_graph = KnowledgeGraph(uri, user, password)  # Updated initialization
         await app.state.knowledge_graph.connect()
@@ -68,7 +70,13 @@ async def lifespan(app: FastAPI):
         
         app.state.entropy_manager = AdvancedEntropyManager(app.state.knowledge_graph, app.state.llm)
         app.state.skill_manager = SkillManager()
-        app.state.task_planner = TaskPlanner("task_planner_id", "Task Planner", app.state.skill_manager, app.state.llm)  # Provide the required arguments
+
+        # Initialize QuantumNLPAgent
+        app.state.quantum_nlp = QuantumNLPAgent("quantum_nlp_id", "Quantum NLP Agent", app.state.skill_manager, app.state.llm)
+
+        # Initialize TaskPlanner with QuantumNLPAgent
+        app.state.task_planner = TaskPlanner("task_planner_id", "Task Planner", app.state.skill_manager, app.state.llm, app.state.quantum_nlp)
+
         app.state.continual_learner = ContinualLearner(app.state.advanced_rl.policy_net)
         
         # Initialize agent_factory before meta_agent
@@ -101,14 +109,14 @@ async def lifespan(app: FastAPI):
             app.state.llm
         )
         
-        logger.info("AGI components initialized successfully")
+        logger.info("AGI components initialized successfully", {"component": "startup"})
         yield
     except Exception as e:
-        logger.error(f"Error during startup: {str(e)}", exc_info=True)
+        logger.error(f"Error during startup: {str(e)}", {"component": "startup", "error": str(e)})
         raise
     finally:
         # Shutdown
-        logger.info("Shutting down AGI components...")
+        logger.info("Shutting down AGI components...", {"component": "shutdown"})
         if app.state.knowledge_graph:
             await app.state.knowledge_graph.close()
 
@@ -163,7 +171,7 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_text()
-            logger.info(f"Received message: {data}")
+            logger.info(f"Received message: {data}", {"component": "websocket", "message": data})
             
             task = {"content": data}
             
@@ -193,14 +201,14 @@ async def websocket_endpoint(websocket: WebSocket):
             # Trigger the continuous improvement loop
             asyncio.create_task(continuous_improvement_loop(app))
     except WebSocketDisconnect:
-        logger.info("WebSocket disconnected")
+        logger.info("WebSocket disconnected", {"component": "websocket"})
     except Exception as e:
-        logger.error(f"Error in WebSocket endpoint: {str(e)}", exc_info=True)
+        logger.error(f"Error in WebSocket endpoint: {str(e)}", {"component": "websocket", "error": str(e)})
 
 async def continuous_improvement_loop(app):
     while True:
         try:
-            logger.info("Starting continuous improvement cycle")
+            logger.info("Starting continuous improvement cycle", {"component": "improvement_loop"})
             
             performance_metrics = await app.state.knowledge_graph.get_system_performance()
             
@@ -216,9 +224,9 @@ async def continuous_improvement_loop(app):
             # Learn from the improvements and adaptations
             await app.state.continual_learner.learn_from_improvements(json.dumps(adaptation_plan))
             
-            logger.info("Completed continuous improvement cycle")
+            logger.info("Completed continuous improvement cycle", {"component": "improvement_loop"})
         except Exception as e:
-            logger.error(f"Error in continuous improvement loop: {str(e)}", exc_info=True)
+            logger.error(f"Error in continuous improvement loop: {str(e)}", {"component": "improvement_loop", "error": str(e)})
         finally:
             await asyncio.sleep(3600)  # Run every hour
 

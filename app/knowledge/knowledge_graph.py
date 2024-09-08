@@ -1,6 +1,6 @@
 from neo4j import GraphDatabase
-from typing import Dict, Any, List, Union
-import logging
+from typing import Dict, Any, List
+from app.utils.logger import StructuredLogger
 import os
 from dotenv import load_dotenv
 import asyncio
@@ -14,7 +14,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 load_dotenv()
 
-logger = logging.getLogger(__name__)
+logger = StructuredLogger("KnowledgeGraph")
 
 class KnowledgeGraph:
     def __init__(self, uri, user, password):

@@ -1,6 +1,7 @@
 from app.agents.base import Agent
 from app.agents.skill_manager import SkillManager
 from app.chat_with_ollama import ChatGPT
+from app.agents.quantum_nlp_agent import QuantumNLPAgent
 from typing import Dict, Any, List
 import json
 import uuid
@@ -10,14 +11,33 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 logger = logging.getLogger(__name__)
 
 class TaskPlanner(Agent):
-    def __init__(self, agent_id: str, name: str, skill_manager: SkillManager, llm: ChatGPT):
+    def __init__(self, agent_id: str, name: str, skill_manager: SkillManager, llm: ChatGPT, quantum_nlp: QuantumNLPAgent):
         super().__init__(agent_id, name, skill_manager, llm)
+        self.quantum_nlp = quantum_nlp
 
     async def process_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(f"Processing task: {task}")
-        subtasks = await self.break_down_task(task)
-        logger.info(f"Subtasks generated: {subtasks}")
-        return {"result": subtasks}
+        analyzed_task = await self.quantum_nlp.analyze_task(task)
+        if analyzed_task['type'] == 'respond':
+            return await self._handle_respond_task(analyzed_task)
+        else:
+            return await self._handle_code_execute_task(analyzed_task)
+
+    async def _handle_respond_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        # Handle respond task
+        response = await self.llm.generate(task['content'])
+        return {"result": response}
+
+    async def _handle_code_execute_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        # Handle code execution task
+        code = await self.llm.generate_code(task['content'])
+        result = await self._execute_code(code)
+        return {"result": result}
+
+    async def _execute_code(self, code: str) -> Dict[str, Any]:
+        # Execute the generated code
+        exec(code)
+        return {"result": "Code executed successfully"}
 
     async def break_down_task(self, task: Dict[str, Any]) -> List[Dict[str, Any]]:
         prompt = f"""
@@ -50,16 +70,18 @@ class TaskPlanner(Agent):
         Ensure that each subtask is a single, atomic operation.
         """
         logger.debug(f"Generated prompt for breaking down task: {prompt}")
-        response = await self.generate_response(prompt)
+        response = await self.llm.chat_with_ollama("You are an expert task planner. Return only the JSON object.", prompt)
         logger.debug(f"Response from LLM: {response}")
         return self._parse_json_response(response)
 
     def _parse_json_response(self, response: str) -> List[Dict[str, Any]]:
         try:
+            if isinstance(response, dict):
+                return response
             parsed_response = json.loads(response)
             logger.debug(f"Parsed JSON response: {parsed_response}")
             return parsed_response
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, TypeError) as e:
             logger.error(f"Failed to parse JSON response: {response}, error: {e}")
             return []
 
@@ -102,40 +124,3 @@ class TaskPlanner(Agent):
         response = await self.llm.chat_with_ollama_with_fallback("You are an expert task optimizer.", prompt)
         logger.debug(f"Response from LLM: {response}")
         return self._parse_json_response(response)
-
-class TaskAnalyzer(Agent):
-    async def process_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        logger.info(f"Processing task: {task}")
-        requirements = await self.analyze_requirements(task)
-        logger.info(f"Requirements analyzed: {requirements}")
-        return {"result": requirements}
-
-    async def analyze_requirements(self, task: Dict[str, Any]) -> List[str]:
-        prompt = f"Analyze the requirements for this task and list the required agent specializations: {task['content']}"
-        logger.debug(f"Generated prompt for analyzing requirements: {prompt}")
-        response = await self.generate_response(prompt)
-        logger.debug(f"Response from LLM: {response}")
-        return self._parse_specializations(response)
-
-    def _parse_specializations(self, response: str) -> List[str]:
-        try:
-            specializations = [spec.strip() for spec in response.split(',')]
-            logger.debug(f"Parsed specializations: {specializations}")
-            return specializations
-        except Exception as e:
-            logger.error(f"Failed to parse specializations: {response}, error: {e}")
-            return []
-
-class ResultSynthesizer(Agent):
-    async def process_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        logger.info(f"Processing task: {task}")
-        synthesized_result = await self.synthesize(task['results'])
-        logger.info(f"Synthesized result: {synthesized_result}")
-        return {"result": synthesized_result}
-
-    async def synthesize(self, results: Dict[str, Any]) -> Dict[str, Any]:
-        prompt = f"Synthesize the following results into a coherent response: {results}"
-        logger.debug(f"Generated prompt for synthesizing results: {prompt}")
-        response = await self.generate_response(prompt)
-        logger.debug(f"Response from LLM: {response}")
-        return {"result": response}

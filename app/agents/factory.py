@@ -145,7 +145,11 @@ class DynamicAgent(Agent):
         enhanced_code = await self._enhance_code_with_context(code, context, language)
         
         # Execute the code in a sandboxed environment
-        return await self.skill_manager.execute_code(enhanced_code, language)
+        try:
+            result = await self.skill_manager.execute_code(enhanced_code, language)
+            return {"result": result}
+        except Exception as e:
+            return {"error": str(e)}
 
     async def _generate_response(self, step: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
         prompt = f"""

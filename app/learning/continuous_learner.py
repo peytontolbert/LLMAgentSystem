@@ -9,6 +9,11 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 import uuid
 
 logger = logging.getLogger(__name__)
+file_handler = logging.FileHandler('errors.log')
+file_handler.setLevel(logging.ERROR)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
 
 class ContinuousLearner:
     def __init__(self, knowledge_graph: KnowledgeGraph, llm: ChatGPT):
@@ -30,6 +35,10 @@ class ContinuousLearner:
         self.learning_rate = max(0.01, min(1.0, self.learning_rate))  # Keep learning rate between 0.01 and 1.0
         
         await self._update_knowledge_graph(extracted_knowledge)
+
+        # Recommend collaboration if the task is new or unfamiliar
+        if novelty_score > self.novelty_threshold:
+            await self._recommend_collaboration(task)
 
     def _calculate_novelty(self, knowledge: List[Dict[str, Any]]) -> float:
         # Implement novelty calculation logic
@@ -74,6 +83,7 @@ class ContinuousLearner:
         Relevant concepts:
         {concepts_str}
         Apply these concepts to improve or solve the task. Provide a clear and concise solution.
+        If unsure or unknown, use the respond tool to gather more information.
         """
         response = await self.llm.chat_with_ollama(prompt)
         
@@ -95,6 +105,7 @@ class ContinuousLearner:
             {{"name": "Insight2", "value": "Description of Insight2"}}
         ]
         Ensure that the output is valid JSON and contains at least one insight.
+        If unsure or unknown, use the respond tool to gather more information.
         """
         insights = await self.llm.chat_with_ollama("You are an AI tasked with extracting insights from feedback.", prompt)
         parsed_insights = self._parse_json_or_text(insights)
@@ -113,6 +124,7 @@ class ContinuousLearner:
                 raise ValueError("Invalid JSON structure")
         except json.JSONDecodeError:
             logger.warning(f"Failed to parse JSON, falling back to text parsing: {text}")
+            logger.error(f"JSON parsing error: {text}", exc_info=True)
             return self._parse_text(text)
 
     def _parse_text(self, text: str) -> List[Dict[str, Any]]:
@@ -135,6 +147,7 @@ class ContinuousLearner:
             Original prompt: {initial_prompt}
             Previous response: {initial_response}
             Provide a more detailed and accurate response, ensuring it meets the required format and contains sufficient information.
+            If unsure or unknown, use the respond tool to gather more information.
             """
             improved_response = await self.llm.chat_with_ollama(feedback_prompt)
             
@@ -168,6 +181,7 @@ class ContinuousLearner:
                 }}
             ]
         }}
+        If unsure or unknown, use the respond tool to gather more information.
         """
         analysis = await self.llm.chat_with_ollama("You are an AI specializing in continuous learning and improvement.", prompt)
         parsed_analysis = json.loads(analysis)
@@ -191,4 +205,24 @@ class ContinuousLearner:
     async def _update_workflow(self, update: Dict[str, Any]):
         # Implement logic to update the workflow
         pass
+
+    async def _recommend_collaboration(self, task: Dict[str, Any]):
+        prompt = f"""
+        The following task appears to be new or unfamiliar:
+        Task: {task['content']}
+        
+        Recommend a collaboration strategy with the respond tool to accomplish this task.
+        Provide your response as a JSON object with the following structure:
+        {{
+            "collaboration_strategy": "Detailed description of the collaboration strategy",
+            "respond_tool_involvement": "Description of how the respond tool will be involved"
+        }}
+        """
+        collaboration_response = await self.llm.chat_with_ollama("You are an AI specializing in recommending collaboration strategies.", prompt)
+        try:
+            collaboration_strategy = json.loads(collaboration_response)
+            logger.info(f"Recommended collaboration strategy: {collaboration_strategy}")
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse JSON response for collaboration recommendation.")
+            logger.error(f"JSON parsing error: {collaboration_response}", exc_info=True)
 

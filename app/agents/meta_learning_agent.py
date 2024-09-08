@@ -2,7 +2,7 @@ import logging
 from app.knowledge.knowledge_graph import KnowledgeGraph
 from app.chat_with_ollama import ChatGPT
 from app.learning.continuous_learner import ContinuousLearner
-from app.quantum.quantum_task_optimizer import QuantumTaskOptimizer
+from app.quantum.quantum_task_optimizer import QuantumInspiredTaskOptimizer
 from typing import List, Dict, Any
 import json
 import uuid
@@ -12,9 +12,14 @@ import asyncio
 import traceback
 
 logger = logging.getLogger(__name__)
+file_handler = logging.FileHandler('errors.log')
+file_handler.setLevel(logging.ERROR)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
 
 class MetaLearningAgent:
-    def __init__(self, knowledge_graph: KnowledgeGraph, llm: ChatGPT, continuous_learner: ContinuousLearner, quantum_optimizer: QuantumTaskOptimizer):
+    def __init__(self, knowledge_graph: KnowledgeGraph, llm: ChatGPT, continuous_learner: ContinuousLearner, quantum_optimizer: QuantumInspiredTaskOptimizer):
         self.knowledge_graph = knowledge_graph
         self.llm = llm
         self.continuous_learner = continuous_learner
@@ -37,6 +42,7 @@ class MetaLearningAgent:
         Relevant quantum-optimized knowledge:
         {json.dumps(top_knowledge, indent=2)}
 
+        If unsure or unknown, use the respond tool to gather more information.
         Provide your response as a JSON object with the following structure:
         {{
             "analysis": "Your detailed analysis of the task",
@@ -54,23 +60,35 @@ class MetaLearningAgent:
             return analysis
         except json.JSONDecodeError:
             logger.warning("Failed to parse JSON response. Returning default analysis.")
+            logger.error(f"JSON parsing error: {response}", exc_info=True)
             return {"analysis": "Failed to parse response", "strategy": ["Proceed with caution"], "estimated_complexity": 0.5, "required_skills": [], "potential_challenges": [], "adaptation_suggestions": []}
 
     async def suggest_improvements(self, feedback: str) -> List[str]:
-        prompt = f"Based on the following feedback, suggest improvements to the system: {feedback}"
+        prompt = f"""
+        Based on the following feedback, suggest improvements to the system:
+        {feedback}
+
+        If unsure or unknown, use the respond tool to gather more information.
+        """
         suggestions = await self.llm.chat_with_ollama("You are a meta-learning AI tasked with suggesting system improvements.", prompt)
         return self._extract_suggestions(suggestions)
 
     async def implement_improvements(self, suggestions: List[str]):
         for suggestion in suggestions:
             try:
-                implementation_prompt = f"Implement the following system improvement: {suggestion}"
+                implementation_prompt = f"""
+                Implement the following system improvement:
+                {suggestion}
+
+                If unsure or unknown, use the respond tool to gather more information.
+                """
                 implementation_response = await self.llm.chat_with_ollama("You are a system improvement implementation expert.", implementation_prompt)
                 
                 try:
                     plan_steps = json.loads(implementation_response)
                 except json.JSONDecodeError:
                     logger.warning(f"Failed to parse JSON response for suggestion: {suggestion}. Using text-based parsing.")
+                    logger.error(f"JSON parsing error: {implementation_response}", exc_info=True)
                     plan_steps = self._parse_text_implementation_plan(implementation_response)
                 
                 if not plan_steps:
@@ -99,8 +117,16 @@ class MetaLearningAgent:
             await self._update_config(step.get('key', ''), step.get('value', ''))
         elif step_type == 'knowledge_graph_update':
             await self.knowledge_graph.add_or_update_node(step.get('label', ''), step.get('properties', {}))
+        elif step_type == 'collaboration':
+            await self._initiate_collaboration(step.get('strategy', ''), step.get('respond_tool_involvement', ''))
         else:
             logger.warning(f"Unknown implementation step type: {step_type}")
+
+    async def _initiate_collaboration(self, strategy: str, respond_tool_involvement: str):
+        logger.info(f"Initiating collaboration with strategy: {strategy}")
+        # Implement collaboration logic here
+        # For now, we'll just log the strategy and involvement
+        logger.info(f"Respond tool involvement: {respond_tool_involvement}")
 
     async def _apply_code_change(self, file_path: str, change: str):
         logger.info(f"Applying code change to file: {file_path}")
@@ -141,6 +167,7 @@ class MetaLearningAgent:
         {relevant_knowledge}
         
         Adapt the execution strategy for the new task: {task}
+        If unsure or unknown, use the respond tool to gather more information.
         Provide your response as a JSON object with the following structure:
         {{
             "adapted_strategy": ["Step 1", "Step 2", ...],
@@ -157,6 +184,7 @@ class MetaLearningAgent:
             return adapted_strategy
         except json.JSONDecodeError:
             logger.warning("Failed to parse JSON response. Returning default adaptation.")
+            logger.error(f"JSON parsing error: {adaptation}", exc_info=True)
             return {"adapted_strategy": ["Proceed with caution"], "reasoning": "Failed to parse response", "estimated_improvement": 0, "risk_assessment": "Unknown risks due to parsing failure"}
 
     async def generate_novel_approach(self, task: str):
@@ -164,6 +192,7 @@ class MetaLearningAgent:
         Generate a novel and creative approach to solve this task: {task}
         Your approach should be innovative and potentially use unconventional methods.
         Consider combining techniques from different domains or using emerging technologies.
+        If unsure or unknown, use the respond tool to gather more information.
         Provide your response as a JSON object with the following structure:
         {{
             "novel_approach": ["Step 1", "Step 2", ...],
@@ -180,6 +209,7 @@ class MetaLearningAgent:
             return json.loads(novel_approach)
         except json.JSONDecodeError:
             logger.warning("Failed to parse JSON response. Returning default novel approach.")
+            logger.error(f"JSON parsing error: {novel_approach}", exc_info=True)
             return {"novel_approach": ["Proceed with caution"], "reasoning": "Failed to parse response", "potential_risks": ["Unknown risks"], "estimated_success_probability": 0.5, "required_resources": [], "fallback_strategy": [], "potential_breakthroughs": []}
 
     async def _store_task_analysis(self, task: str, analysis: Dict[str, Any]):
@@ -220,6 +250,7 @@ class MetaLearningAgent:
         3. Integration of new technologies or components
         4. Removal or replacement of underperforming components
 
+        If unsure or unknown, use the respond tool to gather more information.
         Provide your response as a JSON object with the following structure:
         {{
             "changes": [
@@ -243,6 +274,7 @@ class MetaLearningAgent:
             return adaptation_plan
         except json.JSONDecodeError:
             logger.error("Failed to parse architectural adaptation plan")
+            logger.error(f"JSON parsing error: {response}", exc_info=True)
             return None
 
     async def _implement_architectural_changes(self, adaptation_plan: Dict[str, Any]):

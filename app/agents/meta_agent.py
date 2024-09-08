@@ -18,6 +18,7 @@ from app.memory.memory_system import MemorySystem  # Import MemorySystem
 from app.reinforcement_learning.advanced_rl import AdvancedRL  # Import AdvancedRL
 from app.entropy_management.advanced_entropy_manager import AdvancedEntropyManager  # Import AdvancedEntropyManager
 from app.chat_with_ollama import ChatGPT  # Import ChatGPT
+from app.execution.code_execution_manager import CodeExecutionManager
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,7 @@ class MetaAgent:
         self.nlp_cache = NLPCache()  # Initialize NLPCache
         self.continuous_learner = ContinuousLearner(knowledge_graph, llm)  # Initialize ContinuousLearner
         self.task_prioritizer = TaskPrioritizer()  # Initialize TaskPrioritizer
+        self.code_execution_manager = CodeExecutionManager(llm)
 
     async def process_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
         # Ensure 'content' key is present
@@ -171,3 +173,47 @@ class MetaAgent:
     async def synthesize_results(self, results: Dict[str, Any]) -> Dict[str, Any]:
         synthesizer_agent = await self.agent_factory.create_agent("result_synthesizer")
         return await synthesizer_agent.synthesize(results)
+
+    async def _execute_optimized_task(self, task: Dict[str, Any], strategy: str) -> Dict[str, Any]:
+        # Implement optimized task execution logic
+        pass
+
+    async def _execute_code_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        code = task['content']
+        max_attempts = 3
+        attempt = 0
+
+        while attempt < max_attempts:
+            result = await self.code_execution_manager.execute_and_monitor(
+                code,
+                self._code_execution_callback
+            )
+
+            if result['status'] == 'completed' and result['return_code'] == 0:
+                return {"result": result['result']}
+
+            # If execution failed, try to adapt the code
+            error_analysis = await self.code_execution_manager._analyze_error(result['error'])
+            code = await self.code_execution_manager.adapt_code(code, error_analysis)
+            attempt += 1
+
+        return {"error": "Max attempts reached", "last_result": result}
+
+    def _code_execution_callback(self, status: Dict[str, Any]):
+        # Handle real-time status updates
+        if status['status'] == 'running':
+            logger.info("Code execution in progress...")
+        elif status['status'] == 'success':
+            logger.info(f"Code execution completed successfully: {status['result']}")
+        elif status['status'] == 'error':
+            logger.error(f"Code execution failed: {status['error']}")
+            logger.info(f"Error analysis: {status['analysis']}")
+
+    async def generate_novel_approach(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        # Implement the logic for generating a novel approach to solve the task
+        novel_approach = {
+            "strategy": "novel_strategy",
+            "details": "This is a novel approach to solve the task based on advanced techniques."
+        }
+        logger.info(f"Generated novel approach for task: {task['id']}")
+        return novel_approach
